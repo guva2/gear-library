@@ -49,7 +49,9 @@ class TestCreateUser:
         with pytest.raises(ValueError):
             User.objects.create_user(phone_number="", password="s3cret-pass")
 
-    @pytest.mark.parametrize("phone", INVALID_PHONES[1:] + ["55512345678"])
+    @pytest.mark.parametrize(
+        "phone", [p for p in INVALID_PHONES if p] + ["55512345678"]
+    )
     def test_rejects_invalid_phone_number(self, phone):
         with pytest.raises(ValidationError):
             User.objects.create_user(phone_number=phone, password="s3cret-pass")

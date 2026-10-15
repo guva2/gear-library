@@ -1,11 +1,11 @@
 # Database schema
 
-The relational design for the whole app. Only the `User` table and Django's own tables
-exist in M1. The other tables, and the `User` columns marked with a later milestone, are
-built in the milestone named next to them.
+The relational design for the whole app.
 
 ## Conventions
 
+- Each table notes the milestone that builds it. Where a table's columns arrive in
+  different milestones, its "Built in" column names the milestone for each column.
 - PostgreSQL. Tables are Django models.
 - Every table has Django's `id` primary key (`bigint`) and `created_at`
   (`timestamptz`, set on insert).
@@ -44,12 +44,12 @@ There is no username.
 
 ### `Household`
 
-A residence. It owns gear.
+Built in M4. A residence. It owns gear.
 
 | Column | Type | Rules |
 |---|---|---|
 | `name` | `varchar(32)` | |
-| `owner_id` | → `User` | `on_delete=models.PROTECT`. |
+| `owner_id` | → `User` | Unique. `on_delete=models.PROTECT`. |
 | `street_address` | `varchar(64)` | |
 | `address_line_2` | `varchar(64)` | Optional. |
 | `city` | `varchar(64)` | |
@@ -58,6 +58,8 @@ A residence. It owns gear.
 | `created_at` | `timestamptz` | |
 
 ### `HouseholdInvite`
+
+Built in M4.
 
 | Column | Type | Rules |
 |---|---|---|
@@ -72,7 +74,7 @@ A residence. It owns gear.
 
 ### `Item`
 
-A piece of gear.
+Built in M5. A piece of gear.
 
 | Column | Type | Rules |
 |---|---|---|
@@ -88,7 +90,8 @@ A piece of gear.
 
 ### `Connection`
 
-One row per pair of connected (or requested) users. A connection works both ways.
+Built in M6. One row per pair of connected (or requested) users. A connection works both
+ways.
 
 | Column | Type | Rules |
 |---|---|---|
