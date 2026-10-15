@@ -7,7 +7,7 @@ from django.db import IntegrityError, transaction
 User = get_user_model()
 
 PHONE = "5551234567"
-CONSTRAINT = "accounts_user_phone_number_10_digits"
+CONSTRAINT = "core_user_phone_number_10_digits"
 
 # Each value fits in the column, so only the check constraint can reject it.
 INVALID_PHONES = [

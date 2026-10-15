@@ -22,9 +22,9 @@ The relational design for the whole app.
 
 ## Tables
 
-### `User` (`accounts_user`)
+### `User` (`core_user`)
 
-Custom user model (`AUTH_USER_MODEL = "accounts.User"`). The phone number is the login.
+Custom user model (`AUTH_USER_MODEL = "core.User"`). The phone number is the login.
 There is no username.
 
 | Column | Type | Rules | Built in |
@@ -42,7 +42,7 @@ There is no username.
 
 `groups` and `user_permissions` come from `PermissionsMixin`.
 
-### `Household`
+### `Household` (`core_household`)
 
 Built in M4. A residence. It owns gear.
 
@@ -57,7 +57,7 @@ Built in M4. A residence. It owns gear.
 | `zip_code` | `varchar(5)` | Exactly 5 digits, check `^[0-9]{5}$`. |
 | `created_at` | `timestamptz` | |
 
-### `HouseholdInvite`
+### `HouseholdInvite` (`core_householdinvite`)
 
 Built in M4.
 
@@ -72,7 +72,7 @@ Built in M4.
   most one pending invite per household and invitee.
 - There is no inviter column. Only the owner invites.
 
-### `Item`
+### `Item` (`core_item`)
 
 Built in M5. A piece of gear.
 
@@ -88,7 +88,7 @@ Built in M5. A piece of gear.
 - Check: `borrower_id IS NULL` exactly when `loan_status = 'available'`.
 - There is no loan history. The row holds only the current loan state.
 
-### `Connection`
+### `Connection` (`core_connection`)
 
 Built in M6. One row per pair of connected (or requested) users. A connection works both
 ways.
