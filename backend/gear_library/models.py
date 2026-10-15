@@ -53,7 +53,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(phone_number__regex=PHONE_NUMBER_PATTERN),
-                name="core_user_phone_number_10_digits",
+                name="gear_library_user_phone_number_10_digits",
             ),
         ]
 
