@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env, see .env.example}
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env, see .env.example}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env, see .env.example}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # $$ defers expansion to the container shell, where these variables are set.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env, see .env.example}
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env, see .env.example}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env, see .env.example}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set in .env, see .env.example}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:
