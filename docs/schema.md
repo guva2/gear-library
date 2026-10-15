@@ -114,6 +114,8 @@ These rules span tables, so the database cannot check them alone.
   must delete the household or transfer ownership before leaving.
 - Invites go only to users with no household. Accepting checks this again, and fails if
   the invitee has a household by then. To move, a user leaves first.
+- Accepting an invite clears the invitee from every item of that household they are
+  requesting or borrowing: `borrower` becomes null and `loan_status` becomes `available`.
 - Deleting a household deletes its items (with any loan state on them) and its invites.
   Its members go back to having no household.
 - A borrow request is one conditional update: set the borrower only if the item is
