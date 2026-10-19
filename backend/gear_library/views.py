@@ -239,7 +239,7 @@ def revoke_invite(request, invite_id):
 
 
 def _connection_data(connection, user):
-    """The response to a request the caller sent: pending, or accepted at once."""
+    """A connection in the shape its status lets the caller see: accepted in full, otherwise as a sent request."""
     if connection.status == ConnectionStatus.ACCEPTED:
         return ConnectionSerializer(connection, context={"user": user}).data
     return SentRequestSerializer(connection, context={"user": user}).data

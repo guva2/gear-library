@@ -22,10 +22,12 @@ async function loadPage(signal: AbortSignal): Promise<PageData> {
 export default function ConnectionsPage() {
   const [page, reload] = useLoad(loadPage);
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [sendErrors, setSendErrors] = useState<FieldErrors>({});
   const [sent, setSent] = useState<string | null>(null);
 
   function clearMessages() {
     setErrors({});
+    setSendErrors({});
     setSent(null);
   }
 
@@ -82,7 +84,14 @@ export default function ConnectionsPage() {
           />
         </>
       )}
-      <SendRequest reload={reload} onStart={clearMessages} sent={sent} onSent={setSent} />
+      <SendRequest
+        reload={reload}
+        onStart={clearMessages}
+        errors={sendErrors}
+        setErrors={setSendErrors}
+        sent={sent}
+        onSent={setSent}
+      />
     </>
   );
 }
@@ -192,12 +201,13 @@ function RequestList<R extends { id: number }>({
 interface SendRequestProps {
   reload: () => void;
   onStart: () => void;
+  errors: FieldErrors;
+  setErrors: (errors: FieldErrors) => void;
   sent: string | null;
   onSent: (message: string) => void;
 }
 
-function SendRequest({ reload, onStart, sent, onSent }: SendRequestProps) {
-  const [errors, setErrors] = useState<FieldErrors>({});
+function SendRequest({ reload, onStart, errors, setErrors, sent, onSent }: SendRequestProps) {
   const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {

@@ -239,6 +239,21 @@ describe("answering requests", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("clears a send refusal when another action is taken", async () => {
+    liveBackend(() => ({
+      "POST /api/connections/": json(409, { detail: "You have already sent this user a request." }),
+      "POST /api/connections/12/cancel/": json(204, null),
+    }));
+    await open();
+    fillIn("Phone number", "5551230004");
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("already sent");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request to (555) 123-0004" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
   it("says when the backend cannot be reached", async () => {
     liveBackend(() => ({
       "POST /api/connections/11/accept/": () => {
