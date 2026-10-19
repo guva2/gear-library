@@ -103,6 +103,6 @@ A request is made through one inventory. "Loan inventory" below is that inventor
 | `GET` | `/api/inventories/{id}/requests/` | Admin. Pending requests made through the inventory. | `403`, `404` |
 | `GET` | `/api/loans/` | Logged in. Items the caller has requested or borrowed. | |
 | `POST` | `/api/items/{id}/approve/` | Admin of the loan inventory, other than the borrower. | `403`, `404`, `409`: the request changed. |
-| `POST` | `/api/items/{id}/decline/` | Admin of the loan inventory, other than the borrower. | `403`, `404`, `409`: the request changed. |
+| `POST` | `/api/items/{id}/decline/` | Admin of the loan inventory. | `403`, `404`, `409`: the request changed. |
 | `POST` | `/api/items/{id}/cancel/` | The borrower, while the request is pending. | `403`, `404`, `409`: not pending. |
 | `POST` | `/api/items/{id}/return/` | Admin of the loan inventory while the item is listed there, or the item's owner. Never the borrower. | `403`, `404`, `409`: not on loan. |

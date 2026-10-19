@@ -7,7 +7,9 @@ number of inventories, and you have one role in each:
 - `member`: sees and borrows the inventory's items.
 - `admin`: also lists and removes their own items, approves and declines borrow requests
   made through the inventory, and marks those items returned.
-- `owner`: also invites users, removes members and sets their roles.
+- `owner`: also manages the inventory, its members and its invites.
+
+The full rights of each role are in [`docs/schema.md`](docs/schema.md).
 
 Runs locally with Docker Compose: PostgreSQL, a Django REST Framework backend and a Vite +
 React frontend. The database design is in [`docs/schema.md`](docs/schema.md) and the API
@@ -20,7 +22,9 @@ cp .env.example .env    # then set a real password and secret key, and your UID 
 docker compose up --build
 ```
 
-Open <http://localhost:5173>. The page shows whether the backend and database are up.
+Open <http://localhost:5173>. The page checks once on load whether the backend and
+database are up. On a first start the backend may still be migrating, so reload the page
+to check again.
 
 `docker compose up` starts three services:
 

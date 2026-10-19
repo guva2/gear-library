@@ -2,6 +2,22 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 
+// React 18+ does not warn about a state update after unmount, so record the setters.
+const stateSetters = vi.hoisted(() => [] as ReturnType<typeof vi.fn>[]);
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    useState: (initial: unknown) => {
+      const [value, set] = actual.useState(initial);
+      const setter = vi.fn(set);
+      stateSetters.push(setter);
+      return [value, setter];
+    },
+  };
+});
+
 function respondWith(status: number, body: string) {
   const fetchMock = vi.fn().mockResolvedValue(new Response(body, { status }));
   vi.stubGlobal("fetch", fetchMock);
@@ -44,5 +60,28 @@ describe("health page", () => {
     render(<App />);
 
     expect(await screen.findByText("Could not reach the backend.")).toBeInTheDocument();
+  });
+
+  // Vite's SPA fallback answers an unproxied path with 200 and HTML.
+  it("shows an error for a 200 that is not a health report", async () => {
+    respondWith(200, "<!doctype html><html></html>");
+
+    render(<App />);
+
+    expect(await screen.findByText("Could not reach the backend.")).toBeInTheDocument();
+  });
+
+  it("does not set state after unmounting before the response", async () => {
+    let resolve!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise<Response>((r) => (resolve = r))));
+    stateSetters.length = 0;
+
+    const { unmount } = render(<App />);
+    unmount();
+    resolve(new Response(JSON.stringify({ status: "ok", database: "ok" }), { status: 200 }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(stateSetters.length).toBeGreaterThan(0);
+    for (const setter of stateSetters) expect(setter).not.toHaveBeenCalled();
   });
 });
