@@ -126,8 +126,8 @@ These rules span tables, so the database cannot check them alone.
 
 ### Users
 
-- The app never deletes a user. The `PROTECT` foreign keys make an ORM delete of a user
-  with memberships, invites or items fail.
+- The app never deletes or deactivates a user. `is_active` stays `true`. The `PROTECT`
+  foreign keys make an ORM delete of a user with memberships, invites or items fail.
 
 ### Concurrency
 
