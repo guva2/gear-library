@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
                 ('role', models.CharField(choices=[('member', 'Member'), ('admin', 'Admin'), ('owner', 'Owner')], max_length=6)),
                 ('status', models.CharField(choices=[('pending', 'Pending'), ('active', 'Active')], max_length=7)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('inventory', models.ForeignKey(on_delete=django.db.models.deletion.DO_NOTHING, related_name='memberships', to='gear_library.inventory')),
+                ('inventory', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='memberships', to='gear_library.inventory')),
                 ('invited_by', models.ForeignKey(null=True, on_delete=django.db.models.deletion.PROTECT, related_name='invites_sent', to=settings.AUTH_USER_MODEL)),
                 ('user', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='memberships', to=settings.AUTH_USER_MODEL)),
             ],

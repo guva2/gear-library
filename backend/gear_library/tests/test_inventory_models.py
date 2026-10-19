@@ -95,22 +95,11 @@ def test_deleting_an_inventory_deletes_its_memberships(inventory, ada, bob):
 
 
 @pytest.mark.django_db
-def test_a_raw_sql_delete_of_an_inventory_deletes_its_memberships(inventory, ada, bob):
-    membership(inventory, ada, role="owner")
-    membership(inventory, bob, status="pending", invited_by=ada)
-
-    with connection.cursor() as cursor:
-        cursor.execute("DELETE FROM gear_library_inventory WHERE id = %s", [inventory.pk])
-
-    assert not Membership.objects.exists()
-
-
-@pytest.mark.django_db
-def test_the_inventory_foreign_key_cascades_and_is_checked_at_commit():
+def test_the_inventory_foreign_key_is_no_action_and_checked_at_commit():
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT confdeltype, condeferrable, condeferred FROM pg_constraint"
             " WHERE contype = 'f' AND conrelid = %s::regclass AND confrelid = %s::regclass",
             [Membership._meta.db_table, Inventory._meta.db_table],
         )
-        assert cursor.fetchall() == [("c", True, True)]
+        assert cursor.fetchall() == [("a", True, True)]

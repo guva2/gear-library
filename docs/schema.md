@@ -16,9 +16,7 @@ The relational design for the whole app.
   it to the listed values, in addition to Django `choices`.
 - Foreign keys are `NO ACTION DEFERRABLE INITIALLY DEFERRED` in the database. The
   `on_delete` behaviour shown for each foreign key runs only through Django ORM deletes,
-  not raw SQL. The exception is `Membership.inventory_id`: it is `ON DELETE CASCADE
-  DEFERRABLE INITIALLY DEFERRED` in the database, and `on_delete=models.DO_NOTHING` in
-  Django.
+  not raw SQL.
 - Each format rule (phone number) is enforced twice: by a field validator, and by a
   database check constraint that holds when validation is bypassed.
 
@@ -60,7 +58,7 @@ accepted. Only an `active` row makes the user a member.
 
 | Column | Type | Rules |
 |---|---|---|
-| `inventory_id` | → `Inventory` | `ON DELETE CASCADE` in the database. |
+| `inventory_id` | → `Inventory` | `on_delete=models.CASCADE`. |
 | `user_id` | → `User` | `on_delete=models.PROTECT`. |
 | `role` | `varchar(6)` | `member`, `admin` or `owner`. |
 | `status` | `varchar(7)` | `pending` or `active`. |
@@ -130,10 +128,10 @@ These rules span tables, so the database cannot check them alone.
   (`select_for_update`), then re-read the acting user's membership and role, the target
   membership and the active owners. Two of these changes to one inventory run one at a
   time, so the inventory always keeps an owner.
-- Deleting an inventory is one `DELETE` of its row. The database deletes its memberships
-  in the same statement, after the inventory row. Every operation that locks the inventory
-  row does so before it touches a membership row, so a delete and a role change, removal
-  or leave on the same inventory run one at a time.
+- Deleting an inventory locks its row (`select_for_update`), then deletes its memberships
+  and the row. Every operation that locks the inventory row does so before it touches a
+  membership row, so a delete and a role change, removal or leave on the same inventory
+  run one at a time.
 - Renaming an inventory, inviting, accepting, declining and revoking take no inventory
   lock and no explicit lock.
 - Inviting inserts a pending membership. The unique index on (`inventory_id`, `user_id`)
@@ -149,8 +147,9 @@ These rules span tables, so the database cannot check them alone.
   at a time. A delete after the accept deletes the new member. An accept after the delete
   gets `404`.
 - The foreign key from memberships to the inventory is checked at commit. An invite whose
-  inventory was deleted first gets `404`. A delete that starts after an invite commits
-  deletes the new pending membership with the inventory.
+  inventory was deleted first gets `404`. An invite that commits while a delete holds the
+  inventory lock waits for the delete, then gets `404`. A delete that starts after an
+  invite commits deletes the new pending membership with the inventory.
 - These operations first lock the inventory's row (`select_for_update`): every change to
   its listings, and every borrow request, approve, decline, cancel or mark returned
   through it. An operation that touches several inventories, such as deleting an item
@@ -224,7 +223,6 @@ These rules span tables, so the database cannot check them alone.
 ### Deleting
 
 - Deleting an inventory deletes its memberships, pending ones included, and its listings.
-  The database deletes the memberships through their `ON DELETE CASCADE` foreign key. The
-  items stay with their owners. Pending requests through it are cancelled first, in the
-  same transaction; items on loan through it keep their borrower, and their
-  `loan_inventory_id` becomes null.
+  It locks the inventory first, then deletes its memberships. The items stay with their
+  owners. Pending requests through it are cancelled first, in the same transaction; items
+  on loan through it keep their borrower, and their `loan_inventory_id` becomes null.

@@ -4,7 +4,6 @@ import time
 import pytest
 from django.contrib.auth import get_user_model
 from django.db import connection, connections, transaction
-from django.test.utils import CaptureQueriesContext
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from gear_library import inventories
@@ -107,27 +106,16 @@ class TestAccess:
         assert not Inventory.objects.exists()
         assert not Membership.objects.exists()
 
-    def test_deleting_is_one_delete_of_the_inventory_row(self, inventory, owner):
-        actor = as_(owner, inventory, "owner")
-        with CaptureQueriesContext(connection) as queries:
-            inventories.delete_inventory(actor)
-
-        statements = [
-            query["sql"]
-            for query in queries
-            if not query["sql"].startswith(("SAVEPOINT", "RELEASE"))
-        ]
-        assert len(statements) == 1
-        assert statements[0].startswith('DELETE FROM "gear_library_inventory" ')
-
-    def test_renaming_an_inventory_deleted_since_the_check_is_not_found(
-        self, inventory, owner
-    ):
+    @pytest.mark.parametrize("action", ["rename", "delete"])
+    def test_an_inventory_deleted_since_the_check_is_not_found(self, inventory, owner, action):
         actor = as_(owner, inventory, "owner")
         Inventory.objects.filter(pk=inventory.pk).delete()
 
         with pytest.raises(NotFound):
-            inventories.rename_inventory(actor, "Bouldering")
+            if action == "rename":
+                inventories.rename_inventory(actor, "Bouldering")
+            else:
+                inventories.delete_inventory(actor)
 
 
 @pytest.mark.django_db
@@ -537,6 +525,7 @@ def run_in_thread(name, action, outcomes):
 
 INSERT_MEMBERSHIP = 'INSERT INTO "gear_library_membership" '
 UPDATE_MEMBERSHIP = 'UPDATE "gear_library_membership" '
+SELECT_INVENTORY = 'SELECT "gear_library_inventory".'
 
 
 def hold_after(sql_prefix, held, release):
@@ -710,7 +699,7 @@ class TestCommittedRaces:
         outcomes = {}
 
         def invite_before_the_delete(execute, sql, params, many, context):
-            if sql.startswith('DELETE FROM "gear_library_inventory" '):
+            if sql.startswith(SELECT_INVENTORY) and "FOR UPDATE" in sql:
                 action = lambda: inventories.invite(as_(owner, inventory), invitee.phone_number)
                 run_in_thread("invite", action, outcomes).join(10)
             return execute(sql, params, many, context)
@@ -721,6 +710,25 @@ class TestCommittedRaces:
 
         assert outcomes["invite"] == "ok"
         assert not Inventory.objects.exists()
+        assert not Membership.objects.exists()
+
+    def test_an_invite_waits_for_a_delete_and_is_not_found(self, inventory, owner, invitee):
+        inviter = as_(owner, inventory, "admin")
+        actor = as_(owner, inventory, "owner")
+        held, release = threading.Event(), threading.Event()
+
+        def delete():
+            with transaction.atomic():
+                inventories.delete_inventory(actor)
+                held.set()
+                assert release.wait(10)
+
+        outcomes = self.race(
+            delete, lambda: inventories.invite(inviter, invitee.phone_number), held, release
+        )
+
+        assert outcomes["first"] == "ok"
+        assert isinstance(outcomes["second"], NotFound)
         assert not Membership.objects.exists()
 
     def test_a_second_invite_waits_for_the_first_and_conflicts(

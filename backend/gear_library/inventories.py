@@ -6,8 +6,9 @@ non-member everywhere outside the invite actions.
 
 Setting a role and removing a member, which includes leaving, lock the inventory row and
 then re-read the caller's membership and the owners, so an inventory always keeps an
-owner. Deleting is one `DELETE` of the inventory row, and the database deletes its
-memberships in that statement. Renaming and the invite actions take no lock.
+owner. Deleting locks the inventory row too, then deletes its memberships and the row.
+Each of these locks the inventory before it touches a membership, so on one inventory they
+run one at a time. Renaming and the invite actions take no lock.
 
 Inviting inserts a pending membership; the unique index on (inventory, user) refuses a
 user who is already a member or invited, with `Conflict`. Accepting is one conditional
@@ -150,9 +151,10 @@ def rename_inventory(actor, name):
     return actor
 
 
+@transaction.atomic
 def delete_inventory(actor):
     """`actor` must be an owner."""
-    Inventory.objects.filter(pk=actor.inventory_id).delete()
+    _lock_inventory(actor.inventory_id).delete()
 
 
 @transaction.atomic

@@ -98,9 +98,8 @@ class Membership(models.Model):
     """A user in an inventory. A `pending` membership is an invite the user has not
     accepted yet."""
 
-    # ON DELETE CASCADE in the database, from migration 0004.
     inventory = models.ForeignKey(
-        Inventory, on_delete=models.DO_NOTHING, related_name="memberships"
+        Inventory, on_delete=models.CASCADE, related_name="memberships"
     )
     user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="memberships")
     role = models.CharField(max_length=6, choices=Role.choices)
