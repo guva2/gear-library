@@ -8,6 +8,7 @@ User = get_user_model()
 
 PHONE = "5551234567"
 CONSTRAINT = "gear_library_user_phone_number_10_digits"
+NAMES = {"first_name": "Ada", "last_name": "Lovelace"}
 
 # Each value fits in the column, so only the check constraint can reject it.
 INVALID_PHONES = [
@@ -23,7 +24,7 @@ INVALID_PHONES = [
 @pytest.mark.django_db
 class TestCreateUser:
     def test_stores_phone_and_hashes_password(self):
-        user = User.objects.create_user(phone_number=PHONE, password="s3cret-pass")
+        user = User.objects.create_user(phone_number=PHONE, password="s3cret-pass", **NAMES)
 
         user.refresh_from_db()
         assert user.phone_number == PHONE
@@ -35,33 +36,33 @@ class TestCreateUser:
         assert user.created_at is not None
 
     def test_user_authenticates_by_phone_number(self):
-        User.objects.create_user(phone_number=PHONE, password="s3cret-pass")
+        User.objects.create_user(phone_number=PHONE, password="s3cret-pass", **NAMES)
 
         assert authenticate(phone_number=PHONE, password="s3cret-pass") is not None
         assert authenticate(phone_number=PHONE, password="wrong") is None
 
     def test_without_password_is_unusable(self):
-        user = User.objects.create_user(phone_number=PHONE)
+        user = User.objects.create_user(phone_number=PHONE, **NAMES)
 
         assert not user.has_usable_password()
 
     def test_requires_phone_number(self):
         with pytest.raises(ValueError):
-            User.objects.create_user(phone_number="", password="s3cret-pass")
+            User.objects.create_user(phone_number="", password="s3cret-pass", **NAMES)
 
     @pytest.mark.parametrize(
         "phone", [p for p in INVALID_PHONES if p] + ["55512345678"]
     )
     def test_rejects_invalid_phone_number(self, phone):
         with pytest.raises(ValidationError):
-            User.objects.create_user(phone_number=phone, password="s3cret-pass")
+            User.objects.create_user(phone_number=phone, password="s3cret-pass", **NAMES)
         assert not User.objects.exists()
 
 
 @pytest.mark.django_db
 class TestCreateSuperuser:
     def test_sets_staff_and_superuser_flags(self):
-        user = User.objects.create_superuser(phone_number=PHONE, password="s3cret-pass")
+        user = User.objects.create_superuser(phone_number=PHONE, password="s3cret-pass", **NAMES)
 
         assert user.is_staff
         assert user.is_superuser
@@ -71,13 +72,15 @@ class TestCreateSuperuser:
     def test_refuses_flag_set_false(self, flag):
         with pytest.raises(ValueError):
             User.objects.create_superuser(
-                phone_number=PHONE, password="s3cret-pass", **{flag: False}
+                phone_number=PHONE, password="s3cret-pass", **NAMES, **{flag: False}
             )
 
     def test_createsuperuser_command(self, monkeypatch):
         monkeypatch.setenv("DJANGO_SUPERUSER_PASSWORD", "s3cret-pass")
 
-        call_command("createsuperuser", "--noinput", phone_number=PHONE, verbosity=0)
+        call_command(
+            "createsuperuser", "--noinput", phone_number=PHONE, **NAMES, verbosity=0
+        )
 
         user = User.objects.get(phone_number=PHONE)
         assert user.is_superuser
@@ -88,7 +91,7 @@ class TestCreateSuperuser:
 class TestPhoneNumberValidator:
     @pytest.mark.parametrize("phone", INVALID_PHONES + ["55512345678"])
     def test_full_clean_rejects(self, phone):
-        user = User(phone_number=phone)
+        user = User(phone_number=phone, **NAMES)
         user.set_password("s3cret-pass")
 
         with pytest.raises(ValidationError) as excinfo:
@@ -96,7 +99,7 @@ class TestPhoneNumberValidator:
         assert "phone_number" in excinfo.value.message_dict
 
     def test_full_clean_accepts_ten_digits(self):
-        user = User(phone_number=PHONE)
+        user = User(phone_number=PHONE, **NAMES)
         user.set_password("s3cret-pass")
 
         user.full_clean()
@@ -110,13 +113,41 @@ class TestPhoneNumberDatabaseConstraints:
             User.objects.bulk_create([User(phone_number=phone, password="x")])
 
     def test_check_constraint_rejects_update(self):
-        user = User.objects.create_user(phone_number=PHONE, password="s3cret-pass")
+        user = User.objects.create_user(phone_number=PHONE, password="s3cret-pass", **NAMES)
 
         with pytest.raises(IntegrityError, match=CONSTRAINT), transaction.atomic():
             User.objects.filter(pk=user.pk).update(phone_number="12345")
 
     def test_phone_number_is_unique(self):
-        User.objects.create_user(phone_number=PHONE, password="s3cret-pass")
+        User.objects.create_user(phone_number=PHONE, password="s3cret-pass", **NAMES)
 
         with pytest.raises(IntegrityError), transaction.atomic():
             User.objects.bulk_create([User(phone_number=PHONE, password="x")])
+
+
+@pytest.mark.django_db
+class TestNames:
+    def test_create_user_stores_names(self):
+        user = User.objects.create_user(
+            phone_number=PHONE, password="s3cret-pass", first_name="Ada", last_name="Lovelace"
+        )
+
+        user.refresh_from_db()
+        assert (user.first_name, user.last_name) == ("Ada", "Lovelace")
+
+    @pytest.mark.parametrize("field", ["first_name", "last_name"])
+    @pytest.mark.parametrize("value", ["", "x" * 33])
+    def test_full_clean_rejects_blank_or_long_name(self, field, value):
+        user = User(phone_number=PHONE, first_name="Ada", last_name="Lovelace")
+        setattr(user, field, value)
+        user.set_password("s3cret-pass")
+
+        with pytest.raises(ValidationError) as excinfo:
+            user.full_clean()
+        assert field in excinfo.value.message_dict
+
+    def test_full_clean_accepts_32_character_names(self):
+        user = User(phone_number=PHONE, first_name="x" * 32, last_name="y" * 32)
+        user.set_password("s3cret-pass")
+
+        user.full_clean()

@@ -39,7 +39,10 @@ class User(AbstractBaseUser, PermissionsMixin):
                 message="Enter a US phone number as exactly 10 digits.",
             )
         ],
+        error_messages={"unique": "A user with this phone number already exists."},
     )
+    first_name = models.CharField(max_length=32)
+    last_name = models.CharField(max_length=32)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -47,7 +50,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     objects = UserManager()
 
     USERNAME_FIELD = "phone_number"
-    REQUIRED_FIELDS = []
+    REQUIRED_FIELDS = ["first_name", "last_name"]
 
     class Meta:
         constraints = [

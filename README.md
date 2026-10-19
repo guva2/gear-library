@@ -22,7 +22,8 @@ cp .env.example .env    # then set a real password and secret key, and your UID 
 docker compose up --build
 ```
 
-Open <http://localhost:5173>. The page checks once on load whether the backend and
+Open <http://localhost:5173>, then create an account or log in as a demo user (see
+[Demo data](#demo-data)). The home page checks once on load whether the backend and
 database are up. On a first start the backend may still be migrating, so reload the page
 to check again.
 
@@ -47,6 +48,7 @@ docker compose run --rm backend pytest                        # backend tests
 docker compose run --rm frontend npm test                     # frontend tests
 docker compose run --rm backend python manage.py makemigrations
 docker compose run --rm backend python manage.py createsuperuser
+docker compose run --rm backend python manage.py seed_demo    # demo users, see below
 docker compose run --rm frontend npm install --save-exact <package>
 docker compose down                                           # stop; data stays in the volume
 docker compose down -v                                        # stop and delete the data
@@ -72,3 +74,19 @@ docker compose up --build --renew-anon-volumes
 `node_modules` lives in an anonymous volume, not in `frontend/`. Without
 `--renew-anon-volumes`, the container keeps the old volume and the new packages are
 missing.
+
+## Demo data
+
+```sh
+docker compose run --rm backend python manage.py seed_demo
+```
+
+creates three demo users. Running it again changes nothing: users that already exist are
+left as they are. Log in at <http://localhost:5173> with any of them, using the password
+`gear-library-demo`:
+
+| Phone number | Name |
+|---|---|
+| (555) 555-0101 | Avery Brooks |
+| (555) 555-0102 | Jordan Diaz |
+| (555) 555-0103 | Sam Okafor |
