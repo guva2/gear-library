@@ -128,8 +128,8 @@ describe("as an admin", () => {
 
     const picker = screen.getByRole("combobox", { name: "Connection" });
     expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Dee Park",
-      "Eve Moss",
+      "Dee Park, (555) 123-0005",
+      "Eve Moss, (555) 123-0006",
     ]);
   });
 
@@ -150,11 +150,13 @@ describe("as an admin", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
-    expect(await within(region("Pending invites")).findByText(/123-0006/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(region("Pending invites")).getAllByRole("listitem")).toHaveLength(2),
+    );
     expect(backend.requests(`POST ${URL}invites/`)).toEqual([{ user_id: 6 }]);
     const picker = screen.getByRole("combobox", { name: "Connection" });
     expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Dee Park",
+      "Dee Park, (555) 123-0005",
     ]);
   });
 
@@ -176,19 +178,42 @@ describe("as an admin", () => {
     expect(screen.queryByRole("button", { name: "Invite" })).toBeNull();
   });
 
-  it("shows a refused connection next to the picker", async () => {
+  const REFUSED = json(400, { user_id: ["You can invite only your connections."] });
+
+  it("names a refused connection in the section alert when others remain in the picker", async () => {
+    asRole("admin", { [`POST ${URL}invites/`]: REFUSED });
+    await open();
+    fireEvent.change(screen.getByRole("combobox", { name: "Connection" }), {
+      target: { value: "5" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    expect(await within(region("Pending invites")).findByRole("alert")).toHaveTextContent(
+      "Dee Park was not invited. You can invite only your connections.",
+    );
+    const picker = screen.getByRole("combobox", { name: "Connection" });
+    expect(picker).not.toHaveAttribute("aria-invalid");
+    expect(picker).not.toHaveAccessibleDescription(/only your connections/);
+  });
+
+  it("keeps the refusal visible when the refused connection was the only option", async () => {
+    let connections = CONNECTIONS.slice(0, 3);
     asRole("admin", {
-      [`POST ${URL}invites/`]: json(400, { user_id: ["You can invite only your connections."] }),
+      "GET /api/connections/": () => json(200, connections)({}),
+      [`POST ${URL}invites/`]: () => {
+        connections = CONNECTIONS.slice(0, 2);
+        return REFUSED({});
+      },
     });
     await open();
 
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
-    const picker = screen.getByRole("combobox", { name: "Connection" });
-    await waitFor(() =>
-      expect(picker).toHaveAccessibleDescription("You can invite only your connections."),
+    expect(await within(region("Pending invites")).findByRole("alert")).toHaveTextContent(
+      "Dee Park was not invited. You can invite only your connections.",
     );
-    expect(picker).toHaveFocus();
+    expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull();
   });
 
   it("shows a conflict for the whole invite form", async () => {

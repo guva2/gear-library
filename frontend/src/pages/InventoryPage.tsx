@@ -285,16 +285,27 @@ interface InvitesProps {
 
 function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
-  const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
+    const userId = Number(new FormData(form).get("user_id"));
     const failed = await send(`${base}invites/`, "POST", {
-      body: { user_id: Number(new FormData(form).get("user_id")) },
+      body: { user_id: userId },
       fields: ["user_id"],
     });
-    setErrors(failed ?? {});
+    // A refused person leaves the picker on reload, so the message names them and
+    // sits at section level instead of beside whoever the select falls back to.
+    const refused = invitable.find((user) => user.id === userId);
+    setErrors(
+      failed?.user_id
+        ? {
+            form: [
+              `${refused ? fullName(refused) : "That person"} was not invited. ${failed.user_id.join(" ")}`,
+            ],
+          }
+        : (failed ?? {}),
+    );
     if (!failed) reload();
   }
 
@@ -331,23 +342,17 @@ function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesPr
           <Link to="/connections">My connections</Link>.
         </p>
       ) : (
-        <form ref={formRef} onSubmit={submit} noValidate>
+        <form onSubmit={submit} noValidate>
           <p>
             <label htmlFor="user_id">Connection</label>{" "}
-            <select
-              id="user_id"
-              name="user_id"
-              aria-invalid={errors.user_id ? true : undefined}
-              aria-describedby={errors.user_id ? "user_id-error" : undefined}
-            >
+            <select id="user_id" name="user_id">
               {invitable.map((user) => (
                 <option key={user.id} value={user.id}>
-                  {fullName(user)}
+                  {[fullName(user), formatPhoneNumber(user.phone_number)].join(", ")}
                 </option>
               ))}
             </select>{" "}
             <button type="submit">Invite</button>
-            {errors.user_id && <span id="user_id-error"> {errors.user_id.join(" ")}</span>}
           </p>
         </form>
       )}
