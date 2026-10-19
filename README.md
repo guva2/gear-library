@@ -4,10 +4,12 @@ Share gear through inventories. You own your items. An inventory is a group of p
 share gear: only its members see it and the items listed in it. You can create or join any
 number of inventories, and you have one role in each:
 
-- `member`: sees and borrows the inventory's items.
-- `admin`: also lists and removes their own items, approves and declines borrow requests
-  made through the inventory, and marks those items returned.
-- `owner`: also manages the inventory, its members and its invites.
+- `member`: sees and borrows the inventory's items, and sees who its admins and owners are.
+- `admin`: also sees every member, invites users and revokes invites, lists and removes
+  their own items, approves and declines borrow requests made through the inventory, and
+  marks those items returned.
+- `owner`: also sets members' roles, removes members, and renames or deletes the
+  inventory.
 
 The full rights of each role are in [`docs/schema.md`](docs/schema.md).
 
@@ -48,7 +50,7 @@ docker compose run --rm backend pytest                        # backend tests
 docker compose run --rm frontend npm test                     # frontend tests
 docker compose run --rm backend python manage.py makemigrations
 docker compose run --rm backend python manage.py createsuperuser
-docker compose run --rm backend python manage.py seed_demo    # demo users, see below
+docker compose run --rm backend python manage.py seed_demo    # demo data, see below
 docker compose run --rm frontend npm install --save-exact <package>
 docker compose down                                           # stop; data stays in the volume
 docker compose down -v                                        # stop and delete the data
@@ -81,12 +83,13 @@ missing.
 docker compose run --rm backend python manage.py seed_demo
 ```
 
-creates three demo users. Running it again changes nothing: users that already exist are
-left as they are. Log in at <http://localhost:5173> with any of them, using the password
-`gear-library-demo`:
+creates three demo users and two inventories. Running it again changes nothing: users
+that already exist are left as they are, and a demo inventory is skipped when its owner
+below is already in an inventory with that name. Log in at <http://localhost:5173> with any
+of them, using the password `gear-library-demo`:
 
-| Phone number | Name |
-|---|---|
-| (555) 555-0101 | Avery Brooks |
-| (555) 555-0102 | Jordan Diaz |
-| (555) 555-0103 | Sam Okafor |
+| Phone number | Name | Climbing Club | Camping Crew |
+|---|---|---|---|
+| (555) 555-0101 | Avery Brooks | owner | invited by Sam, pending |
+| (555) 555-0102 | Jordan Diaz | admin | owner |
+| (555) 555-0103 | Sam Okafor | member | admin |

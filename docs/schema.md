@@ -64,11 +64,14 @@ inventories.
 
 - Unique on (`inventory_id`, `user_id`).
 - Each role has the rights of the roles before it:
-  - `member`: sees the inventory and its items, and requests to borrow its items.
-  - `admin`: also lists their own items in the inventory and removes them, approves and
-    declines borrow requests made through the inventory, and marks those items returned.
-  - `owner`: also invites users, revokes invites, removes members, sets any member's role,
-    removes any item from the inventory, renames the inventory and deletes it.
+  - `member`: sees the inventory and its items, sees the names of its admins and owners,
+    and requests to borrow its items.
+  - `admin`: also sees every member with their phone number and role, invites users, sees
+    and revokes any pending invite, lists their own items in the inventory and removes
+    them, approves and declines borrow requests made through the inventory, and marks
+    those items returned.
+  - `owner`: also removes members, sets any member's role, removes any item from the
+    inventory, renames the inventory and deletes it.
 
 ### `InventoryInvite` (`gear_library_inventoryinvite`)
 
@@ -150,11 +153,20 @@ These rules span tables, so the database cannot check them alone.
 - Creating an inventory makes the creator its owner.
 - An inventory always has at least one owner. The last owner cannot leave, be removed, or
   take a lower role. They must make another member an owner or delete the inventory.
-- Only owners invite and revoke invites. Invites go only to users who are not members.
-  Accepting checks this again. The invitee joins with the `member` role. A pending invite
-  stays valid if its sender loses the owner role.
+- Admins and owners invite users and revoke any pending invite of the inventory. Only
+  owners set roles and remove members. Owners set any member's role, including another
+  owner's and their own.
+- Invites go only to users who are not members, and a user has at most one pending invite
+  per inventory. Accepting checks membership again. The invitee always joins with the
+  `member` role. After a decline or revoke the user can be invited again. A pending invite
+  stays valid if its sender leaves or takes the `member` role.
 - Only members of an inventory see it and the items listed in it. An item's owner always
   sees it. A borrower also sees the item they hold.
+- A `member` sees only the first and last names of the inventory's admins and owners: not
+  the other members, and no phone numbers. Admins and owners see every member with name,
+  phone number and role, and every pending invite of the inventory.
+- An invitee sees their own pending invites, with the inventory's name and the inviter's
+  name, without becoming a member.
 
 ### Listings
 

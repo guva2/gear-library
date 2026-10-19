@@ -62,3 +62,71 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.phone_number
+
+
+class Inventory(models.Model):
+    name = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Role(models.TextChoices):
+    MEMBER = "member"
+    ADMIN = "admin"
+    OWNER = "owner"
+
+
+class Membership(models.Model):
+    inventory = models.ForeignKey(
+        Inventory, on_delete=models.CASCADE, related_name="memberships"
+    )
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="memberships")
+    role = models.CharField(max_length=6, choices=Role.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(role__in=Role.values),
+                name="gear_library_membership_role_valid",
+            ),
+            models.UniqueConstraint(
+                fields=["inventory", "user"], name="gear_library_membership_one_per_user"
+            ),
+        ]
+
+
+class InviteStatus(models.TextChoices):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    REVOKED = "revoked"
+
+
+class InventoryInvite(models.Model):
+    inventory = models.ForeignKey(Inventory, on_delete=models.CASCADE, related_name="invites")
+    invitee = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="invites_received"
+    )
+    invited_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="invites_sent"
+    )
+    status = models.CharField(
+        max_length=8, choices=InviteStatus.choices, default=InviteStatus.PENDING
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=InviteStatus.values),
+                name="gear_library_inventoryinvite_status_valid",
+            ),
+            models.UniqueConstraint(
+                fields=["inventory", "invitee"],
+                condition=models.Q(status=InviteStatus.PENDING),
+                name="gear_library_inventoryinvite_one_pending",
+            ),
+        ]
