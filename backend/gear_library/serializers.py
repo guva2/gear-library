@@ -76,8 +76,8 @@ class InviteeNumberSerializer(serializers.Serializer):
 class InventoryInviteSerializer(serializers.ModelSerializer):
     """A pending invite as the inventory's admins and owners see it.
 
-    The invitee appears by phone number only: a name or user id would let any inventory
-    owner look up who holds a number.
+    The invitee appears by phone number only: a name or user id would let anyone who can
+    send an invite look up who holds a number.
     """
 
     invitee = InviteeNumberSerializer(read_only=True)

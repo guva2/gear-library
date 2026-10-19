@@ -159,6 +159,31 @@ describe("as an admin", () => {
     );
   });
 
+  it("explains a refused invite after losing the admin role in another session", async () => {
+    let role: Role = "admin";
+    asRole("admin", {
+      [`GET ${URL}`]: () => json(200, { id: 7, name: "Climbing Club", role })({}),
+      [`GET ${URL}members/`]: () => {
+        const names = [{ first_name: "Bob", last_name: "Stone" }];
+        return json(200, role === "admin" ? members("admin") : names)({});
+      },
+      [`POST ${URL}invites/`]: () => {
+        role = "member";
+        return json(403, { detail: "You do not have permission to perform this action." })({});
+      },
+    });
+    await open();
+
+    fillIn("Phone number", "5551230004");
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    expect(await screen.findByText("Your role: member")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Pending invites" })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "You do not have permission to perform this action.",
+    );
+  });
+
   it("revokes an invite", async () => {
     let invites = [INVITE];
     const backend = asRole("admin", {
@@ -204,11 +229,36 @@ describe("as an owner", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Role for Ada Lovelace" }), {
       target: { value: "member" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Yes, change my role" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "An inventory must keep at least one owner.",
     );
     expect(screen.getByRole("combobox", { name: "Role for Ada Lovelace" })).toHaveValue("owner");
+  });
+
+  it("changes their own role only after confirming", async () => {
+    const backend = asRole("owner", {
+      [`PATCH ${URL}members/1/`]: json(200, { ...ADA, role: "admin" }),
+    });
+    await open();
+    const own = () => screen.getByRole("combobox", { name: "Role for Ada Lovelace" });
+
+    fireEvent.change(own(), { target: { value: "member" } });
+    expect(
+      screen.getByText(/Change your role to member\? You will no longer be an owner\./),
+    ).toBeInTheDocument();
+    expect(own()).toHaveValue("owner");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("button", { name: "Yes, change my role" })).toBeNull();
+    expect(backend.requests(`PATCH ${URL}members/1/`)).toHaveLength(0);
+
+    fireEvent.change(own(), { target: { value: "admin" } });
+    fireEvent.click(screen.getByRole("button", { name: "Yes, change my role" }));
+
+    await waitFor(() =>
+      expect(backend.requests(`PATCH ${URL}members/1/`)).toEqual([{ role: "admin" }]),
+    );
   });
 
   it("removes another member, but offers no Remove for themselves", async () => {
@@ -295,6 +345,15 @@ describe("loading", () => {
 
     expect(await screen.findByText("Inventory not found.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/");
+  });
+
+  it("shows not-found for an id that is not a number, without calling the API", async () => {
+    const backend = fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
+
+    renderAt("/inventories/2%3Fx%3D");
+
+    expect(await screen.findByText("Inventory not found.")).toBeInTheDocument();
+    expect(backend.requests("GET /api/inventories/2?x=/")).toHaveLength(0);
   });
 
   it("shows an error when the backend cannot be reached", async () => {

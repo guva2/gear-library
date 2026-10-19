@@ -135,8 +135,7 @@ def _validated(serializer_class, request):
 def inventory_list(request):
     if request.method == "POST":
         name = _validated(InventoryNameSerializer, request)["name"]
-        inventory = inventories.create_inventory(request.user, name)
-        membership = Membership(inventory=inventory, role=Role.OWNER)
+        membership = inventories.create_inventory(request.user, name)
         return Response(InventorySerializer(membership).data, status=status.HTTP_201_CREATED)
     memberships = (
         Membership.objects.filter(user=request.user)

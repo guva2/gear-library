@@ -26,7 +26,7 @@ def owner():
 
 @pytest.fixture
 def inventory(owner):
-    return inventories.create_inventory(owner, "Climbing")
+    return inventories.create_inventory(owner, "Climbing").inventory
 
 
 def join(inventory, role, n):
@@ -46,10 +46,11 @@ def owner_count(inventory):
 @pytest.mark.django_db
 class TestCreateInventory:
     def test_makes_the_creator_its_owner(self, owner):
-        inventory = inventories.create_inventory(owner, "Climbing")
+        membership = inventories.create_inventory(owner, "Climbing")
 
-        assert inventory.name == "Climbing"
-        assert role_of(inventory, owner) == "owner"
+        assert membership.inventory.name == "Climbing"
+        assert (membership.user, membership.role) == (owner, "owner")
+        assert role_of(membership.inventory, owner) == "owner"
 
     def test_creates_nothing_when_the_membership_insert_fails(self, owner, monkeypatch):
         def fail(**kwargs):
@@ -346,7 +347,7 @@ def test_two_owners_stepping_down_at_once_leave_one_owner(monkeypatch):
     """The first owner's change holds the inventory lock until the second owner's change
     is queued behind it. The second one then counts the owners again and is refused."""
     first = make_user(1)
-    inventory = inventories.create_inventory(first, "Climbing")
+    inventory = inventories.create_inventory(first, "Climbing").inventory
     second = join(inventory, "owner", 2)
 
     locked = threading.Event()

@@ -53,8 +53,18 @@ type Send = (
 
 export default function InventoryPage() {
   const { id } = useParams();
+  // The router decodes the segment, so a `%3F` or `%2F` in it would change the API path.
+  if (!id || !/^[0-9]+$/.test(id)) return <NotFound />;
   // A new id gets a fresh page, not the previous inventory's state.
   return <InventoryView key={id} base={`/api/inventories/${id}/`} />;
+}
+
+function NotFound() {
+  return (
+    <p>
+      Inventory not found. <Link to="/">Go home</Link>
+    </p>
+  );
 }
 
 function InventoryView({ base }: { base: string }) {
@@ -62,16 +72,24 @@ function InventoryView({ base }: { base: string }) {
   const navigate = useNavigate();
   const [page, reload] = useLoad((signal) => loadPage(base, signal));
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [refusal, setRefusal] = useState<FieldErrors>({});
 
-  /** Sends a change. Returns the errors to show, or `null` when it succeeded. */
+  /**
+   * Sends a change. Returns the errors for the caller to show, or `null` when it succeeded.
+   * A 403 is shown here instead and returns no errors: the caller has lost a role, and the
+   * reload can remove the section that sent the change.
+   */
   const send: Send = async (path, method, { body, fields = [] } = {}) => {
+    setRefusal({});
     try {
       const response = await apiFetch(path, { method, body });
       if (response.ok) return null;
       const errors = await readErrors(response, fields);
       // The refusal may come from a change someone else made; show the current state.
       reload();
-      return errors;
+      if (response.status !== 403) return errors;
+      setRefusal(errors);
+      return {};
     } catch {
       return unreachable();
     }
@@ -91,13 +109,7 @@ function InventoryView({ base }: { base: string }) {
 
   if (page.status === "loading") return <p>Loading…</p>;
   if (page.status === "error") {
-    if (page.error instanceof HttpError && page.error.status === 404) {
-      return (
-        <p>
-          Inventory not found. <Link to="/">Go home</Link>
-        </p>
-      );
-    }
+    if (page.error instanceof HttpError && page.error.status === 404) return <NotFound />;
     return <p role="alert">Could not load the inventory.</p>;
   }
 
@@ -110,6 +122,7 @@ function InventoryView({ base }: { base: string }) {
       <p>
         <Link to="/">My inventories</Link>
       </p>
+      <FormErrors errors={refusal} />
       <FormErrors errors={errors} />
       {people.staff ? (
         <MemberTable
@@ -165,6 +178,14 @@ interface MemberTableProps {
 
 function MemberTable({ members, ownerId, onSetRole, onRemove }: MemberTableProps) {
   const controls = ownerId !== undefined;
+  // The owner's own new role, waiting for confirmation: any other role drops owner rights.
+  const [ownRole, setOwnRole] = useState<{ member: Member; role: Role } | null>(null);
+
+  function pickRole(member: Member, role: Role) {
+    if (member.id === ownerId) setOwnRole({ member, role });
+    else onSetRole(member, role);
+  }
+
   return (
     <section aria-labelledby="members">
       <h3 id="members">Members</h3>
@@ -187,7 +208,7 @@ function MemberTable({ members, ownerId, onSetRole, onRemove }: MemberTableProps
                   <select
                     aria-label={`Role for ${fullName(member)}`}
                     value={member.role}
-                    onChange={(event) => onSetRole(member, event.target.value as Role)}
+                    onChange={(event) => pickRole(member, event.target.value as Role)}
                   >
                     {ROLES.map((role) => (
                       <option key={role} value={role}>
@@ -216,6 +237,23 @@ function MemberTable({ members, ownerId, onSetRole, onRemove }: MemberTableProps
           ))}
         </tbody>
       </table>
+      {ownRole && (
+        <p>
+          {`Change your role to ${ownRole.role}? You will no longer be an owner.`}{" "}
+          <button
+            type="button"
+            onClick={() => {
+              onSetRole(ownRole.member, ownRole.role);
+              setOwnRole(null);
+            }}
+          >
+            Yes, change my role
+          </button>{" "}
+          <button type="button" onClick={() => setOwnRole(null)}>
+            Cancel
+          </button>
+        </p>
+      )}
     </section>
   );
 }

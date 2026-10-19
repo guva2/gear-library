@@ -91,8 +91,7 @@ def _refuse_losing_last_owner(membership):
 @transaction.atomic
 def create_inventory(user, name):
     inventory = Inventory.objects.create(name=name)
-    Membership.objects.create(inventory=inventory, user=user, role=Role.OWNER)
-    return inventory
+    return Membership.objects.create(inventory=inventory, user=user, role=Role.OWNER)
 
 
 @transaction.atomic
