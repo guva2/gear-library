@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from gear_library.models import Inventory, InventoryInvite, Membership, Role
+from gear_library.models import Inventory, Membership, MembershipStatus, Role
 
 DEMO_PASSWORD = "gear-library-demo"
 
@@ -58,18 +58,25 @@ class Command(BaseCommand):
         created = 0
         for demo in DEMO_INVENTORIES:
             owner_phone = demo["members"][0][0]
-            if Membership.objects.filter(
+            if Membership.objects.active().filter(
                 inventory__name=demo["name"], user=users[owner_phone]
             ).exists():
                 continue
             inventory = Inventory.objects.create(name=demo["name"])
             for phone_number, role in demo["members"]:
                 Membership.objects.create(
-                    inventory=inventory, user=users[phone_number], role=role
+                    inventory=inventory,
+                    user=users[phone_number],
+                    role=role,
+                    status=MembershipStatus.ACTIVE,
                 )
             for invitee, invited_by in demo["invites"]:
-                InventoryInvite.objects.create(
-                    inventory=inventory, invitee=users[invitee], invited_by=users[invited_by]
+                Membership.objects.create(
+                    inventory=inventory,
+                    user=users[invitee],
+                    role=Role.MEMBER,
+                    status=MembershipStatus.PENDING,
+                    invited_by=users[invited_by],
                 )
             created += 1
         existing = len(DEMO_INVENTORIES) - created

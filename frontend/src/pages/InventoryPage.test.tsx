@@ -147,7 +147,9 @@ describe("as an admin", () => {
 
   it("shows a conflict for the whole invite form", async () => {
     asRole("admin", {
-      [`POST ${URL}invites/`]: json(409, { detail: "This user is already a member." }),
+      [`POST ${URL}invites/`]: json(409, {
+        detail: "This user is already a member or has a pending invite.",
+      }),
     });
     await open();
 
@@ -155,7 +157,7 @@ describe("as an admin", () => {
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
     expect(await within(region("Pending invites")).findByRole("alert")).toHaveTextContent(
-      "This user is already a member.",
+      "This user is already a member or has a pending invite.",
     );
   });
 

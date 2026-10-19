@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import InventoryInvite, Role
+from .models import Membership, Role
 from .phone import normalize_phone_number
 
 User = get_user_model()
@@ -74,17 +74,17 @@ class InviteeNumberSerializer(serializers.Serializer):
 
 
 class InventoryInviteSerializer(serializers.ModelSerializer):
-    """A pending invite as the inventory's admins and owners see it.
+    """A pending membership as the inventory's admins and owners see it.
 
     The invitee appears by phone number only: a name or user id would let anyone who can
     send an invite look up who holds a number.
     """
 
-    invitee = InviteeNumberSerializer(read_only=True)
+    invitee = InviteeNumberSerializer(source="user", read_only=True)
     invited_by = PersonNameSerializer(read_only=True)
 
     class Meta:
-        model = InventoryInvite
+        model = Membership
         fields = ["id", "invitee", "invited_by"]
         read_only_fields = fields
 
@@ -94,12 +94,12 @@ class NewInviteSerializer(serializers.Serializer):
 
 
 class MyInviteSerializer(serializers.ModelSerializer):
-    """A pending invite as its invitee sees it, before joining."""
+    """A pending membership as its invitee sees it, before joining."""
 
     inventory_name = serializers.CharField(source="inventory.name", read_only=True)
     invited_by = PersonNameSerializer(read_only=True)
 
     class Meta:
-        model = InventoryInvite
+        model = Membership
         fields = ["id", "inventory_name", "invited_by"]
         read_only_fields = fields

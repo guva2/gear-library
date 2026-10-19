@@ -16,7 +16,7 @@ from rest_framework.settings import api_settings
 
 from . import inventories
 from .authentication import CsrfSessionAuthentication
-from .models import InventoryInvite, InviteStatus, Membership, Role
+from .models import Membership, Role
 from .serializers import (
     InventoryInviteSerializer,
     InventoryNameSerializer,
@@ -138,7 +138,8 @@ def inventory_list(request):
         membership = inventories.create_inventory(request.user, name)
         return Response(InventorySerializer(membership).data, status=status.HTTP_201_CREATED)
     memberships = (
-        Membership.objects.filter(user=request.user)
+        Membership.objects.active()
+        .filter(user=request.user)
         .select_related("inventory")
         .order_by("inventory__name", "inventory_id")
     )
@@ -167,7 +168,8 @@ def inventory_detail(request, inventory_id):
 def member_list(request, inventory_id):
     membership = inventories.get_membership(request.user, inventory_id)
     members = (
-        Membership.objects.filter(inventory_id=inventory_id)
+        Membership.objects.active()
+        .filter(inventory_id=inventory_id)
         .select_related("user")
         .order_by("user__last_name", "user__first_name", "user_id")
     )
@@ -196,8 +198,9 @@ def inventory_invites(request, inventory_id):
         invite = inventories.invite(actor, phone_number)
         return Response(InventoryInviteSerializer(invite).data, status=status.HTTP_201_CREATED)
     invites = (
-        InventoryInvite.objects.filter(inventory_id=inventory_id, status=InviteStatus.PENDING)
-        .select_related("invitee", "invited_by")
+        Membership.objects.pending()
+        .filter(inventory_id=inventory_id)
+        .select_related("user", "invited_by")
         .order_by("created_at", "id")
     )
     return Response(InventoryInviteSerializer(invites, many=True).data)
@@ -206,7 +209,8 @@ def inventory_invites(request, inventory_id):
 @api_view(["GET"])
 def my_invites(request):
     invites = (
-        InventoryInvite.objects.filter(invitee=request.user, status=InviteStatus.PENDING)
+        Membership.objects.pending()
+        .filter(user=request.user)
         .select_related("inventory", "invited_by")
         .order_by("created_at", "id")
     )

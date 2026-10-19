@@ -90,6 +90,6 @@ of them, using the password `gear-library-demo`:
 
 | Phone number | Name | Climbing Club | Camping Crew |
 |---|---|---|---|
-| (555) 555-0101 | Avery Brooks | owner | invited by Sam, pending |
+| (555) 555-0101 | Avery Brooks | owner | pending invite from Sam, not a member yet |
 | (555) 555-0102 | Jordan Diaz | admin | owner |
 | (555) 555-0103 | Sam Okafor | member | admin |

@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection, transaction
 from django.db.models import ProtectedError
 
-from gear_library.models import Inventory, InventoryInvite, Membership
+from gear_library.models import Inventory, Membership
 
 User = get_user_model()
 
@@ -28,99 +28,89 @@ def assert_rejected_by(constraint, create):
         create()
 
 
+def membership(inventory, user, role="member", status="active", invited_by=None):
+    return Membership.objects.create(
+        inventory=inventory, user=user, role=role, status=status, invited_by=invited_by
+    )
+
+
 @pytest.mark.django_db
 class TestMembership:
     def test_role_check_rejects_an_unknown_role(self, inventory, ada):
         assert_rejected_by(
             "gear_library_membership_role_valid",
-            lambda: Membership.objects.create(inventory=inventory, user=ada, role="boss"),
+            lambda: membership(inventory, ada, role="boss"),
         )
 
-    def test_a_user_has_one_membership_per_inventory(self, inventory, ada):
-        Membership.objects.create(inventory=inventory, user=ada, role="member")
-
+    @pytest.mark.parametrize("status", ["maybe", ""])
+    def test_status_check_rejects_an_unknown_status(self, inventory, ada, status):
         assert_rejected_by(
-            "gear_library_membership_one_per_user",
-            lambda: Membership.objects.create(inventory=inventory, user=ada, role="admin"),
+            "gear_library_membership_status_valid",
+            lambda: membership(inventory, ada, status=status),
         )
 
-    def test_deleting_a_user_with_a_membership_is_refused(self, inventory, ada):
-        Membership.objects.create(inventory=inventory, user=ada, role="owner")
-
-        with pytest.raises(ProtectedError):
-            ada.delete()
-
-
-@pytest.mark.django_db
-class TestInventoryInvite:
-    def invite(self, inventory, invitee, invited_by, status="pending"):
-        return InventoryInvite.objects.create(
-            inventory=inventory, invitee=invitee, invited_by=invited_by, status=status
-        )
-
-    def test_status_check_rejects_an_unknown_status(self, inventory, ada, bob):
+    @pytest.mark.parametrize("role", ["admin", "owner"])
+    def test_a_pending_membership_must_have_the_member_role(self, inventory, ada, bob, role):
         assert_rejected_by(
-            "gear_library_inventoryinvite_status_valid",
-            lambda: self.invite(inventory, bob, ada, status="maybe"),
+            "gear_library_membership_pending_is_member",
+            lambda: membership(inventory, bob, role=role, status="pending", invited_by=ada),
         )
 
-    def test_one_pending_invite_per_inventory_and_invitee(self, inventory, ada, bob):
-        self.invite(inventory, bob, ada)
+    @pytest.mark.parametrize("first_status", ["pending", "active"])
+    def test_a_user_has_one_membership_per_inventory_whatever_its_status(
+        self, inventory, ada, bob, first_status
+    ):
+        membership(inventory, bob, status=first_status, invited_by=ada)
 
-        assert_rejected_by(
-            "gear_library_inventoryinvite_one_pending",
-            lambda: self.invite(inventory, bob, ada),
-        )
+        for status in ["pending", "active"]:
+            assert_rejected_by(
+                "gear_library_membership_one_per_user",
+                lambda: membership(inventory, bob, status=status, invited_by=ada),
+            )
 
-    def test_finished_invites_do_not_block_a_new_pending_one(self, inventory, ada, bob):
-        for status in ["accepted", "declined", "revoked"]:
-            self.invite(inventory, bob, ada, status=status)
-
-        self.invite(inventory, bob, ada)
-
-        assert InventoryInvite.objects.count() == 4
-
-    @pytest.mark.parametrize("person", ["invitee", "invited_by"])
-    def test_deleting_an_invited_or_inviting_user_is_refused(self, inventory, ada, bob, person):
-        invite = self.invite(inventory, bob, ada)
+    @pytest.mark.parametrize("person", ["user", "invited_by"])
+    def test_deleting_a_member_or_an_inviter_is_refused(self, inventory, ada, bob, person):
+        invite = membership(inventory, bob, status="pending", invited_by=ada)
 
         with pytest.raises(ProtectedError):
             getattr(invite, person).delete()
 
+    def test_active_and_pending_select_by_status(self, inventory, ada, bob):
+        active = membership(inventory, ada, role="owner")
+        pending = membership(inventory, bob, status="pending", invited_by=ada)
+
+        assert list(Membership.objects.active()) == [active]
+        assert list(Membership.objects.pending()) == [pending]
+
 
 @pytest.mark.django_db
-def test_deleting_an_inventory_deletes_its_memberships_and_invites(inventory, ada, bob):
-    Membership.objects.create(inventory=inventory, user=ada, role="owner")
-    InventoryInvite.objects.create(inventory=inventory, invitee=bob, invited_by=ada)
+def test_deleting_an_inventory_deletes_its_memberships(inventory, ada, bob):
+    membership(inventory, ada, role="owner")
+    membership(inventory, bob, status="pending", invited_by=ada)
 
     inventory.delete()
 
     assert not Membership.objects.exists()
-    assert not InventoryInvite.objects.exists()
     assert User.objects.count() == 2
 
 
 @pytest.mark.django_db
-def test_a_raw_sql_delete_of_an_inventory_deletes_its_memberships_and_invites(
-    inventory, ada, bob
-):
-    Membership.objects.create(inventory=inventory, user=ada, role="owner")
-    InventoryInvite.objects.create(inventory=inventory, invitee=bob, invited_by=ada)
+def test_a_raw_sql_delete_of_an_inventory_deletes_its_memberships(inventory, ada, bob):
+    membership(inventory, ada, role="owner")
+    membership(inventory, bob, status="pending", invited_by=ada)
 
     with connection.cursor() as cursor:
         cursor.execute("DELETE FROM gear_library_inventory WHERE id = %s", [inventory.pk])
 
     assert not Membership.objects.exists()
-    assert not InventoryInvite.objects.exists()
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("model", [Membership, InventoryInvite])
-def test_the_inventory_foreign_key_cascades_and_is_checked_at_commit(model):
+def test_the_inventory_foreign_key_cascades_and_is_checked_at_commit():
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT confdeltype, condeferrable, condeferred FROM pg_constraint"
             " WHERE contype = 'f' AND conrelid = %s::regclass AND confrelid = %s::regclass",
-            [model._meta.db_table, Inventory._meta.db_table],
+            [Membership._meta.db_table, Inventory._meta.db_table],
         )
         assert cursor.fetchall() == [("c", True, True)]

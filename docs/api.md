@@ -190,15 +190,23 @@ a lower role.
 |---|---|---|---|
 | `GET` | `/api/inventories/{id}/invites/` | Admin. The inventory's pending invites. | `403`, `404` |
 | `POST` | `/api/inventories/{id}/invites/` | Admin. Invites a user by phone number. | `400`: invalid number, or no such user. `403`, `404`. `409`: already a member, or an invite is pending. |
-| `POST` | `/api/invites/{id}/revoke/` | Admin of the invite's inventory. Any pending invite. | `403`, `404`, `409`: not pending. |
+| `POST` | `/api/invites/{id}/revoke/` | Admin of the invite's inventory. Any pending invite. | `403`. `404`: no such invite. `409`: already accepted. |
 | `GET` | `/api/invites/` | Logged in. The caller's pending invites. | |
-| `POST` | `/api/invites/{id}/accept/` | The invitee. Joins as `member`. | `403`, `404`, `409`: declined, revoked, or accepted by someone who has since left. |
-| `POST` | `/api/invites/{id}/decline/` | The invitee. | `403`, `404`, `409`: not pending. |
+| `POST` | `/api/invites/{id}/accept/` | The invitee. Joins as `member`. | `403`. `404`: no such invite. |
+| `POST` | `/api/invites/{id}/decline/` | The invitee. | `403`. `404`: no such invite. `409`: already accepted. |
+
+An invite is a pending membership, and an invite `id` is that membership's id. Accepting
+makes it an active membership with the same id. Declining and revoking delete it, so its
+id is then unknown (`404`).
 
 Under `/api/invites/{id}/`, an invite is visible only to its invitee and to the admins and
-owners of its inventory. Anyone else, including a `member` of the inventory, gets `404`.
-A caller who sees the invite but may not take the action gets `403`: an admin who accepts
-or declines, or an invitee who revokes.
+owners of its inventory. Anyone else, including a `member` of the inventory and another
+invitee, gets `404`, whether the invite is pending, accepted or gone. A caller who sees
+the invite but may not take the action gets `403`: an admin who accepts or declines, or an
+invitee who revokes.
+
+A user with a pending invite is not a member: every `/api/inventories/{id}/` path of that
+inventory returns `404` for them, and the inventory is not in their `GET /api/inventories/`.
 
 #### Inventory invite
 
@@ -224,7 +232,9 @@ first.
 {"phone_number": ["No user has this phone number."]}
 ```
 
-After a decline or revoke the same number can be invited again.
+`409` `{"detail": "This user is already a member or has a pending invite."}` when the user
+is a member or already invited. After a decline or revoke the same number can be invited
+again.
 
 #### My invite
 
@@ -241,11 +251,11 @@ so it carries only the inventory's name.
 
 The three `POST /api/invites/{id}/` actions take no body. `accept` returns `200` with the
 [Inventory](#inventory) just joined, whose `role` is `member`. Accepting is idempotent:
-an invitee who is already a member keeps their membership and role and gets the same
-`200`, and the invite is marked accepted. Accepting an accepted invite again returns `200`
-while the invitee is still a member. `decline` and `revoke` return `204` with no body. Any
-other answer to an invite that is no longer pending is a `409`
-`{"detail": "This invite is no longer pending."}`.
+accepting an accepted invite again returns `200` with the inventory and the member's
+current role. `decline` and `revoke` return `204` with no body. Declining or revoking an
+accepted invite is a `409` `{"detail": "This invite is no longer pending."}`. An invite
+that was declined or revoked, or whose member has left, is a `404`
+`{"detail": "Invite not found."}`.
 
 ## Gear (M5)
 

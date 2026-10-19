@@ -4,7 +4,7 @@ import pytest
 from django.contrib.auth import authenticate, get_user_model
 from django.core.management import call_command
 
-from gear_library.models import Inventory, InventoryInvite, Membership
+from gear_library.models import Inventory, Membership
 
 User = get_user_model()
 
@@ -22,10 +22,9 @@ def snapshot():
             for u in User.objects.all()
         },
         "inventories": set(Inventory.objects.values_list("pk", "name")),
-        "memberships": set(Membership.objects.values_list("pk", "inventory", "user", "role")),
-        "invites": set(
-            InventoryInvite.objects.values_list(
-                "pk", "inventory", "invitee", "invited_by", "status"
+        "memberships": set(
+            Membership.objects.values_list(
+                "pk", "inventory", "user", "role", "status", "invited_by"
             )
         ),
     }
@@ -74,14 +73,13 @@ def test_creates_two_inventories_using_every_role_and_one_pending_invite():
 
     inventories = list(Inventory.objects.all())
     assert len(inventories) == 2
-    assert set(Membership.objects.values_list("role", flat=True)) == {"member", "admin", "owner"}
+    active = Membership.objects.active()
+    assert set(active.values_list("role", flat=True)) == {"member", "admin", "owner"}
     for inventory in inventories:
-        assert inventory.memberships.filter(role="owner").exists()
-    invite = InventoryInvite.objects.get()
-    assert invite.status == "pending"
-    invitee_memberships = Membership.objects.filter(user=invite.invitee)
-    assert not invitee_memberships.filter(inventory=invite.inventory).exists()
-    inviter = Membership.objects.get(inventory=invite.inventory, user=invite.invited_by)
+        assert active.filter(inventory=inventory, role="owner").exists()
+    invite = Membership.objects.pending().get()
+    assert invite.role == "member"
+    inviter = active.get(inventory=invite.inventory, user=invite.invited_by)
     assert inviter.role in ("admin", "owner")
 
 
@@ -90,7 +88,7 @@ def test_every_demo_user_belongs_to_an_inventory():
     seed()
 
     for user in User.objects.all():
-        assert user.memberships.exists()
+        assert user.memberships.active().exists()
 
 
 @pytest.mark.django_db
@@ -99,14 +97,14 @@ def test_leaves_a_changed_demo_inventory_alone():
     membership = Membership.objects.filter(role="member").first()
     membership.role = "admin"
     membership.save()
-    InventoryInvite.objects.update(status="declined")
+    Membership.objects.pending().delete()
 
     seed()
 
     membership.refresh_from_db()
     assert membership.role == "admin"
     assert Inventory.objects.count() == 2
-    assert not InventoryInvite.objects.filter(status="pending").exists()
+    assert not Membership.objects.pending().exists()
 
 
 @pytest.mark.django_db
@@ -119,7 +117,7 @@ def test_does_not_touch_an_inventory_with_a_demo_name_that_is_not_the_demo_one()
     )
     for name in demo_names:
         real = Inventory.objects.create(name=name)
-        Membership.objects.create(inventory=real, user=stranger, role="owner")
+        Membership.objects.create(inventory=real, user=stranger, role="owner", status="active")
 
     seed()
 

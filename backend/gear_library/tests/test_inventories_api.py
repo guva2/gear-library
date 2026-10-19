@@ -2,7 +2,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
-from gear_library.models import Inventory, InventoryInvite, Membership
+from gear_library.models import Inventory, Membership
 
 User = get_user_model()
 
@@ -40,19 +40,30 @@ def name_of(user):
     return {"first_name": user.first_name, "last_name": user.last_name}
 
 
+def add_pending(inventory, user, invited_by):
+    return Membership.objects.create(
+        inventory=inventory, user=user, role="member", status="pending", invited_by=invited_by
+    )
+
+
 @pytest.fixture
 def people():
-    """An inventory with one user in each role, and a stranger outside it."""
-    names = ["Olive", "Adam", "Mia", "Stan"]
-    owner, admin, member, stranger = (make_user(n, name) for n, name in enumerate(names, 1))
+    """An inventory with one user in each role, a user invited by the admin, and a
+    stranger outside it."""
+    names = ["Olive", "Adam", "Mia", "Pat", "Stan"]
+    owner, admin, member, pending, stranger = (
+        make_user(n, name) for n, name in enumerate(names, 1)
+    )
     inventory = Inventory.objects.create(name="Climbing")
     for user, role in [(owner, "owner"), (admin, "admin"), (member, "member")]:
-        Membership.objects.create(inventory=inventory, user=user, role=role)
+        Membership.objects.create(inventory=inventory, user=user, role=role, status="active")
+    add_pending(inventory, pending, admin)
     return {
         "inventory": inventory,
         "owner": owner,
         "admin": admin,
         "member": member,
+        "pending": pending,
         "stranger": stranger,
     }
 
@@ -78,7 +89,10 @@ class TestAnonymous:
 class TestInventories:
     def test_lists_only_the_callers_inventories_with_their_role(self, people):
         other = Inventory.objects.create(name="Elsewhere")
-        Membership.objects.create(inventory=other, user=people["stranger"], role="owner")
+        Membership.objects.create(
+            inventory=other, user=people["stranger"], role="owner", status="active"
+        )
+        add_pending(other, people["admin"], people["stranger"])
 
         response = client_for(people["admin"]).get(INVENTORIES_URL)
 
@@ -128,14 +142,26 @@ class TestInventories:
             ("post", "invites/"),
         ],
     )
-    def test_a_non_member_gets_not_found(self, people, method, suffix):
-        client = client_for(people["stranger"])
+    @pytest.mark.parametrize("viewer", ["stranger", "pending"])
+    def test_a_non_member_or_invited_user_gets_not_found(self, people, method, suffix, viewer):
+        client = client_for(people[viewer])
         url = inventory_url(people["inventory"], suffix)
 
-        response = getattr(client, method)(url, {"name": "x", "role": "member"}, format="json")
+        response = getattr(client, method)(
+            url, {"name": "x", "role": "member", "phone_number": "5551230005"}, format="json"
+        )
 
         assert response.status_code == 404
         assert Inventory.objects.get().name == "Climbing"
+        assert Membership.objects.count() == 4
+
+    def test_an_invited_user_cannot_leave(self, people):
+        url = inventory_url(people["inventory"], f"members/{people['pending'].id}/")
+
+        response = client_for(people["pending"]).delete(url)
+
+        assert response.status_code == 404
+        assert Membership.objects.get(user=people["pending"]).status == "pending"
 
     def test_an_owner_renames(self, people):
         response = client_for(people["owner"]).patch(
@@ -168,16 +194,11 @@ class TestInventories:
         assert (rename.status_code, set_role.status_code) == (403, 403)
 
     def test_an_owner_deletes_it_with_its_memberships_and_invites(self, people):
-        InventoryInvite.objects.create(
-            inventory=people["inventory"], invitee=people["stranger"], invited_by=people["owner"]
-        )
-
         response = client_for(people["owner"]).delete(inventory_url(people["inventory"]))
 
         assert response.status_code == 204
         assert not Inventory.objects.exists()
         assert not Membership.objects.exists()
-        assert not InventoryInvite.objects.exists()
 
 
 @pytest.mark.django_db
@@ -239,12 +260,19 @@ class TestMembers:
         assert response.status_code == 409
         assert response.json() == {"detail": "An inventory must keep at least one owner."}
 
-    def test_setting_the_role_of_a_non_member_is_not_found(self, people):
+    @pytest.mark.parametrize("target", ["stranger", "pending"])
+    def test_setting_the_role_of_a_non_member_is_not_found(self, people, target):
         response = client_for(people["owner"]).patch(
-            self.member_url(people, people["stranger"]), {"role": "admin"}, format="json"
+            self.member_url(people, people[target]), {"role": "admin"}, format="json"
         )
 
         assert response.status_code == 404
+
+    def test_removing_an_invited_user_as_a_member_is_not_found(self, people):
+        response = client_for(people["owner"]).delete(self.member_url(people, people["pending"]))
+
+        assert response.status_code == 404
+        assert Membership.objects.get(user=people["pending"]).status == "pending"
 
     def test_an_owner_removes_a_member(self, people):
         response = client_for(people["owner"]).delete(self.member_url(people, people["admin"]))
@@ -281,19 +309,20 @@ class TestInventoryInvites:
 
     @pytest.mark.parametrize("actor", ["admin", "owner"])
     def test_admins_and_owners_invite_by_a_formatted_phone_number(self, people, actor):
-        response = self.invite(people, actor, "(555) 123-0004")
+        response = self.invite(people, actor, "(555) 123-0005")
 
         assert response.status_code == 201
-        invite = InventoryInvite.objects.get()
+        invite = Membership.objects.get(user=people["stranger"])
+        assert (invite.status, invite.role) == ("pending", "member")
         assert response.json() == {
             "id": invite.id,
-            "invitee": {"phone_number": "5551230004"},
+            "invitee": {"phone_number": "5551230005"},
             "invited_by": name_of(people[actor]),
         }
 
     def test_a_member_cannot_invite(self, people):
-        assert self.invite(people, "member", "5551230004").status_code == 403
-        assert not InventoryInvite.objects.exists()
+        assert self.invite(people, "member", "5551230005").status_code == 403
+        assert not Membership.objects.filter(user=people["stranger"]).exists()
 
     @pytest.mark.parametrize(
         "phone_number, message",
@@ -308,34 +337,35 @@ class TestInventoryInvites:
         assert response.status_code == 400
         assert response.json() == {"phone_number": [message]}
 
-    def test_inviting_a_member_or_someone_already_invited_conflicts(self, people):
-        assert self.invite(people, "owner", people["member"].phone_number).status_code == 409
-        assert self.invite(people, "owner", "5551230004").status_code == 201
-        assert self.invite(people, "admin", "5551230004").status_code == 409
+    @pytest.mark.parametrize("person", ["member", "pending"])
+    def test_inviting_a_member_or_someone_already_invited_conflicts(self, people, person):
+        response = self.invite(people, "owner", people[person].phone_number)
+
+        assert response.status_code == 409
+        assert response.json() == {
+            "detail": "This user is already a member or has a pending invite."
+        }
 
     @pytest.mark.parametrize("actor", ["admin", "owner"])
-    def test_admins_and_owners_list_every_pending_invite(self, people, actor):
-        self.invite(people, "owner", "5551230004")
-        declined = make_user(5)
-        InventoryInvite.objects.create(
-            inventory=people["inventory"],
-            invitee=declined,
-            invited_by=people["admin"],
-            status="declined",
-        )
-
+    def test_admins_and_owners_list_only_the_pending_invites(self, people, actor):
         response = client_for(people[actor]).get(inventory_url(people["inventory"], "invites/"))
 
         assert response.status_code == 200
-        assert [i["invitee"] for i in response.json()] == [{"phone_number": "5551230004"}]
+        assert response.json() == [
+            {
+                "id": Membership.objects.get(user=people["pending"]).id,
+                "invitee": {"phone_number": people["pending"].phone_number},
+                "invited_by": name_of(people["admin"]),
+            }
+        ]
 
     def test_a_pending_invite_shows_the_invitee_only_by_phone_number(self, people):
-        created = self.invite(people, "owner", "5551230004").json()
+        created = self.invite(people, "owner", "5551230005").json()
         listed = client_for(people["owner"]).get(inventory_url(people["inventory"], "invites/"))
 
         for body in [created, *listed.json()]:
             assert set(body["invitee"]) == {"phone_number"}
-            assert "Stan" not in str(body)
+            assert "Stan" not in str(body) and "Pat" not in str(body)
 
     def test_a_member_cannot_list_invites(self, people):
         url = inventory_url(people["inventory"], "invites/")
@@ -348,22 +378,13 @@ class TestInventoryInvites:
 class TestMyInvites:
     @pytest.fixture
     def invite(self, people):
-        return InventoryInvite.objects.create(
-            inventory=people["inventory"], invitee=people["stranger"], invited_by=people["admin"]
-        )
+        return Membership.objects.get(user=people["pending"])
 
     def answer(self, user, invite, action):
         return client_for(user).post(f"{INVITES_URL}{invite.id}/{action}/")
 
     def test_the_invitee_sees_the_inventory_name_and_who_invited_them(self, people, invite):
-        InventoryInvite.objects.create(
-            inventory=people["inventory"],
-            invitee=people["stranger"],
-            invited_by=people["owner"],
-            status="revoked",
-        )
-
-        response = client_for(people["stranger"]).get(INVITES_URL)
+        response = client_for(people["pending"]).get(INVITES_URL)
 
         assert response.status_code == 200
         assert response.json() == [
@@ -375,13 +396,14 @@ class TestMyInvites:
         ]
         assert client_for(people["owner"]).get(INVITES_URL).json() == []
 
-    def test_seeing_an_invite_does_not_show_the_inventory(self, people, invite):
-        response = client_for(people["stranger"]).get(inventory_url(people["inventory"]))
+    def test_an_invitee_sees_neither_the_inventory_nor_it_in_their_list(self, people, invite):
+        client = client_for(people["pending"])
 
-        assert response.status_code == 404
+        assert client.get(inventory_url(people["inventory"])).status_code == 404
+        assert client.get(INVENTORIES_URL).json() == []
 
     def test_accepting_joins_as_member(self, people, invite):
-        response = self.answer(people["stranger"], invite, "accept")
+        response = self.answer(people["pending"], invite, "accept")
 
         assert response.status_code == 200
         assert response.json() == {
@@ -389,59 +411,60 @@ class TestMyInvites:
             "name": "Climbing",
             "role": "member",
         }
+        members = client_for(people["owner"]).get(inventory_url(people["inventory"], "members/"))
+        assert full(people["pending"], "member") in members.json()
 
     def test_accepting_twice_returns_the_inventory_again(self, people, invite):
-        first = self.answer(people["stranger"], invite, "accept")
+        first = self.answer(people["pending"], invite, "accept")
 
-        again = self.answer(people["stranger"], invite, "accept")
+        again = self.answer(people["pending"], invite, "accept")
 
         assert again.status_code == 200
         assert again.json() == first.json()
 
-    def test_declining(self, people, invite):
-        response = self.answer(people["stranger"], invite, "decline")
+    def test_declining_deletes_the_invite(self, people, invite):
+        response = self.answer(people["pending"], invite, "decline")
 
         assert response.status_code == 204
-        invite.refresh_from_db()
-        assert invite.status == "declined"
+        assert not Membership.objects.filter(pk=invite.pk).exists()
 
     @pytest.mark.parametrize("actor", ["admin", "owner"])
     def test_admins_and_owners_revoke(self, people, invite, actor):
         response = self.answer(people[actor], invite, "revoke")
 
         assert response.status_code == 204
-        invite.refresh_from_db()
-        assert invite.status == "revoked"
+        assert not Membership.objects.filter(pk=invite.pk).exists()
 
-    def test_answering_twice_conflicts(self, people, invite):
-        self.answer(people["stranger"], invite, "decline")
+    @pytest.mark.parametrize("action, by", [("decline", "pending"), ("revoke", "owner")])
+    def test_declining_or_revoking_after_an_accept_conflicts(self, people, invite, action, by):
+        self.answer(people["pending"], invite, "accept")
 
-        response = self.answer(people["stranger"], invite, "accept")
+        response = self.answer(people[by], invite, action)
 
         assert response.status_code == 409
         assert response.json() == {"detail": "This invite is no longer pending."}
 
-    @pytest.mark.parametrize("action", ["accept", "decline", "revoke"])
-    def test_a_plain_member_or_an_outsider_gets_not_found(self, people, invite, action):
-        outsider = make_user(6)
+    def test_answering_a_declined_invite_is_not_found(self, people, invite):
+        self.answer(people["pending"], invite, "decline")
 
-        for user in [people["member"], outsider]:
+        response = self.answer(people["pending"], invite, "accept")
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Invite not found."}
+
+    @pytest.mark.parametrize("action", ["accept", "decline", "revoke"])
+    @pytest.mark.parametrize("state", ["pending", "active", "gone"])
+    def test_a_non_party_gets_not_found_whatever_the_state(self, people, invite, action, state):
+        if state == "active":
+            self.answer(people["pending"], invite, "accept")
+        elif state == "gone":
+            self.answer(people["pending"], invite, "decline")
+
+        for user in [people["member"], people["stranger"]]:
             assert self.answer(user, invite, action).status_code == 404
 
-    @pytest.mark.parametrize("action", ["accept", "decline", "revoke"])
-    @pytest.mark.parametrize("status", ["declined", "revoked"])
-    @pytest.mark.parametrize("viewer", ["member", "outsider"])
-    def test_a_non_party_cannot_tell_a_finished_invite_from_an_unknown_one(
-        self, people, invite, action, status, viewer
-    ):
-        invite.status = status
-        invite.save()
-        user = people["member"] if viewer == "member" else make_user(6)
-
-        assert self.answer(user, invite, action).status_code == 404
-
     def test_the_invitee_cannot_revoke_and_an_admin_cannot_accept(self, people, invite):
-        assert self.answer(people["stranger"], invite, "revoke").status_code == 403
+        assert self.answer(people["pending"], invite, "revoke").status_code == 403
         assert self.answer(people["admin"], invite, "accept").status_code == 403
 
     def test_an_unknown_invite_is_not_found(self, people):

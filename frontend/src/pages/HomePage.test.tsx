@@ -136,16 +136,14 @@ describe("pending invites", () => {
   it("shows why an invite could not be accepted", async () => {
     signedIn({
       "GET /api/invites/": json(200, [INVITE]),
-      "POST /api/invites/30/accept/": json(409, {
-        detail: "This invite is no longer pending.",
-      }),
+      "POST /api/invites/30/accept/": json(404, { detail: "Invite not found." }),
     });
     renderAt("/");
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept invite to Camping Crew" }));
 
     expect(await within(section("Invites")).findByRole("alert")).toHaveTextContent(
-      "This invite is no longer pending.",
+      "Invite not found.",
     );
   });
 });
