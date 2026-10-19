@@ -37,6 +37,7 @@ export async function apiFetch(path: string, options: ApiOptions = {}): Promise<
   const headers = new Headers();
   if (options.body !== undefined) headers.set("Content-Type", "application/json");
   if (UNSAFE_METHODS.has(method)) {
+    if (!readCookie("csrftoken")) csrfCookie = null;
     await ensureCsrfCookie();
     // Read at call time: Django replaces the token at login.
     const token = readCookie("csrftoken");

@@ -64,6 +64,21 @@ describe("home page", () => {
   });
 });
 
+describe("logout from a stale tab", () => {
+  it("goes to the login page when the session is already gone", async () => {
+    fakeBackend({
+      "GET /api/auth/me/": json(200, ADA),
+      "POST /api/auth/logout/": ANONYMOUS,
+    });
+    renderAt("/");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
+
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
+    expect(screen.queryByText("Signed in as Ada Lovelace")).not.toBeInTheDocument();
+  });
+});
+
 describe("login page", () => {
   it("logs in and shows the home page", async () => {
     fakeBackend({ "GET /api/auth/me/": ANONYMOUS, "POST /api/auth/login/": json(200, ADA) });
@@ -169,5 +184,22 @@ describe("register page", () => {
       "This password is too short. This password is too common.",
     );
     expect(screen.getByLabelText("First name")).toBeValid();
+  });
+
+  it("moves focus to the first invalid field after a failed submit", async () => {
+    fakeBackend({
+      "POST /api/auth/register/": json(400, {
+        first_name: ["This field may not be blank."],
+        password: ["This password is too short."],
+      }),
+    });
+    renderAt("/register");
+
+    fillIn("Phone number", "5551234567");
+    fillIn("Password", "abc");
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    await screen.findByText("This field may not be blank.");
+    expect(screen.getByLabelText("First name")).toHaveFocus();
   });
 });

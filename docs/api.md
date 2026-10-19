@@ -33,7 +33,7 @@ builds its endpoints. The roles and rules behind "who may call" are in
 | Method | Path | Who | Main errors |
 |---|---|---|---|
 | `GET` | `/api/auth/csrf/` | Anyone. Sets the `csrftoken` cookie. | |
-| `POST` | `/api/auth/register/` | Not logged in. Creates a user. | `400`: invalid or duplicate phone number, weak password. `403`: logged in. |
+| `POST` | `/api/auth/register/` | Not logged in. Creates a user. | `400`: invalid or duplicate phone number, weak password (a duplicate number and a weak password are reported together). `403`: logged in. |
 | `POST` | `/api/auth/login/` | Anyone. | `400`: wrong phone number or password. |
 | `POST` | `/api/auth/logout/` | Logged in. | `403` |
 | `GET` | `/api/auth/me/` | Logged in. The current user. | `403` when anonymous. |
@@ -71,7 +71,7 @@ The body of `register`, `login` and `me` responses.
 | `phone_number` | string | Required. See [Phone numbers](#phone-numbers). |
 | `first_name` | string | Required. 1 to 32 characters after trimming spaces. |
 | `last_name` | string | Required. 1 to 32 characters after trimming spaces. |
-| `password` | string | Required. Must pass Django's password validators: at least 8 characters, not too common, not all digits, not too similar to the names. |
+| `password` | string | Required. Must pass Django's password validators: at least 8 characters, not too common, not all digits, not too similar to the phone number or the names. |
 
 `201` with the new [User](#user). The caller is logged in.
 

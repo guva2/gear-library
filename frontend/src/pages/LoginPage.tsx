@@ -2,13 +2,14 @@ import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth, type FromState, type User } from "../auth";
-import { Field, FormErrors, UNREACHABLE } from "../forms";
+import { Field, FormErrors, UNREACHABLE, useFocusFirstInvalid } from "../forms";
 
 export default function LoginPage() {
   const { setUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [errors, setErrors] = useState<FieldErrors>({});
+  const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -32,7 +33,7 @@ export default function LoginPage() {
   return (
     <>
       <h2>Log in</h2>
-      <form onSubmit={submit} noValidate>
+      <form ref={formRef} onSubmit={submit} noValidate>
         <FormErrors errors={errors} />
         <Field
           name="phone_number"

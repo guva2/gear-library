@@ -15,8 +15,13 @@ export default function HomePage() {
     try {
       const response = await apiFetch("/api/auth/logout/", { method: "POST" });
       if (!response.ok) {
-        setErrors(await readErrors(response));
-        return;
+        const errors = await readErrors(response);
+        // A 403 that is not a CSRF failure means the session is already gone.
+        const csrfFailed = errors.form?.some((message) => message.startsWith("CSRF"));
+        if (response.status !== 403 || csrfFailed) {
+          setErrors(errors);
+          return;
+        }
       }
       setUser(null);
       navigate("/login", { replace: true });

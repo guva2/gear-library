@@ -105,6 +105,16 @@ describe("apiFetch", () => {
     expect(callsTo(fetchMock, "/api/thing/")).toHaveLength(1);
   });
 
+  it("asks for the CSRF cookie again when the cookie has gone missing", async () => {
+    const fetchMock = stubFetch();
+
+    await api.apiFetch("/api/thing/", { method: "POST" });
+    clearCookie();
+    await api.apiFetch("/api/thing/", { method: "POST" });
+
+    expect(callsTo(fetchMock, "/api/auth/csrf/")).toHaveLength(2);
+  });
+
   it("asks for the CSRF cookie again after a failed attempt", async () => {
     const fetchMock = vi
       .fn()

@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth, type FromState, type User } from "../auth";
-import { Field, FormErrors, UNREACHABLE } from "../forms";
+import { Field, FormErrors, UNREACHABLE, useFocusFirstInvalid } from "../forms";
 
 const FIELDS = ["phone_number", "first_name", "last_name", "password"];
 
@@ -11,6 +11,7 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [errors, setErrors] = useState<FieldErrors>({});
+  const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -34,7 +35,7 @@ export default function RegisterPage() {
   return (
     <>
       <h2>Create an account</h2>
-      <form onSubmit={submit} noValidate>
+      <form ref={formRef} onSubmit={submit} noValidate>
         <FormErrors errors={errors} />
         <Field
           name="phone_number"

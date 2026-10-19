@@ -20,6 +20,7 @@ from .serializers import LoginSerializer, RegisterSerializer, UserSerializer
 User = get_user_model()
 
 WRONG_CREDENTIALS = "Wrong phone number or password."
+PHONE_TAKEN = User._meta.get_field("phone_number").error_messages["unique"]
 
 
 @api_view(["GET"])
@@ -61,10 +62,15 @@ def register(request):
     fields = serializer.validated_data
     password = fields.pop("password")
 
+    errors = {}
+    if User.objects.filter(phone_number=fields["phone_number"]).exists():
+        errors["phone_number"] = [PHONE_TAKEN]
     try:
         validate_password(password, User(**fields))
     except DjangoValidationError as error:
-        raise ValidationError({"password": error.messages})
+        errors["password"] = error.messages
+    if errors:
+        raise ValidationError(errors)
 
     try:
         with transaction.atomic():
@@ -75,8 +81,7 @@ def register(request):
         # Another signup for the same number inserted after this one's full_clean.
         if not User.objects.filter(phone_number=fields["phone_number"]).exists():
             raise
-        unique = User._meta.get_field("phone_number").error_messages["unique"]
-        raise ValidationError({"phone_number": [unique]})
+        raise ValidationError({"phone_number": [PHONE_TAKEN]})
 
     login(request, user)
     return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)

@@ -1,4 +1,5 @@
 import pytest
+from django.db import IntegrityError
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
@@ -116,6 +117,37 @@ class TestRegister:
         assert list(response.json()) == ["password"]
         assert any(message in error for error in response.json()["password"])
         assert not User.objects.exists()
+
+    def test_rejects_a_password_built_from_the_phone_number(self, client):
+        response = client.post(
+            REGISTER_URL, {**REGISTRATION, "password": PHONE + "a"}, format="json"
+        )
+
+        assert response.status_code == 400
+        assert list(response.json()) == ["password"]
+        assert any("too similar" in error for error in response.json()["password"])
+        assert not User.objects.exists()
+
+    def test_reports_a_duplicate_phone_number_and_a_weak_password_together(self, client, user):
+        response = client.post(REGISTER_URL, {**REGISTRATION, "password": "abc"}, format="json")
+
+        assert response.status_code == 400
+        body = response.json()
+        assert set(body) == {"phone_number", "password"}
+        assert body["phone_number"] == ["A user with this phone number already exists."]
+        assert any("too short" in error for error in body["password"])
+        assert User.objects.count() == 1
+
+    def test_an_integrity_error_that_is_not_a_duplicate_phone_propagates(
+        self, client, monkeypatch
+    ):
+        def fail(*args, **kwargs):
+            raise IntegrityError("some other constraint")
+
+        monkeypatch.setattr(User.objects, "create_user", fail)
+
+        with pytest.raises(IntegrityError, match="some other constraint"):
+            client.post(REGISTER_URL, REGISTRATION, format="json")
 
     def test_rejects_a_duplicate_phone_number(self, client, user):
         response = client.post(
