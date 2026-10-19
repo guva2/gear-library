@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { AppRoutes } from "./App";
@@ -108,6 +108,25 @@ describe("login page", () => {
       "Wrong phone number or password.",
     );
     expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
+  });
+
+  it("shows a repeated form error in a new alert element", async () => {
+    fakeBackend({
+      "POST /api/auth/login/": json(400, {
+        non_field_errors: ["Wrong phone number or password."],
+      }),
+    });
+    renderAt("/login");
+
+    fillIn("Phone number", "5551234567");
+    fillIn("Password", "wrong");
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+    const first = await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).not.toBe(first));
+    expect(screen.getByRole("alert")).toHaveTextContent("Wrong phone number or password.");
   });
 
   it("shows a phone number error next to the phone number field", async () => {

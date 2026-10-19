@@ -38,8 +38,18 @@ export function useFocusFirstInvalid(errors: FieldErrors) {
   return form;
 }
 
+const submitIds = new WeakMap<FieldErrors, number>();
+let lastSubmitId = 0;
+
+/** Each new `errors` object remounts the alert, so a repeated message is announced again. */
 export function FormErrors({ errors }: { errors: FieldErrors }) {
-  return errors.form ? <p role="alert">{errors.form.join(" ")}</p> : null;
+  if (!errors.form) return null;
+  if (!submitIds.has(errors)) submitIds.set(errors, ++lastSubmitId);
+  return (
+    <p key={submitIds.get(errors)} role="alert">
+      {errors.form.join(" ")}
+    </p>
+  );
 }
 
-export const UNREACHABLE: FieldErrors = { form: ["Could not reach the backend."] };
+export const unreachable = (): FieldErrors => ({ form: ["Could not reach the backend."] });

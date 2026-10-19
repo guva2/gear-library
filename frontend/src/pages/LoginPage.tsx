@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth, type FromState, type User } from "../auth";
-import { Field, FormErrors, UNREACHABLE, useFocusFirstInvalid } from "../forms";
+import { Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
 
 const FIELDS = ["phone_number", "password"];
 
@@ -28,7 +28,7 @@ export default function LoginPage() {
       setUser((await response.json()) as User);
       navigate((location.state as FromState | null)?.from ?? "/", { replace: true });
     } catch {
-      setErrors(UNREACHABLE);
+      setErrors(unreachable());
     }
   }
 

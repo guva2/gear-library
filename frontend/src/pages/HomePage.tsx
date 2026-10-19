@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth } from "../auth";
-import { FormErrors, UNREACHABLE } from "../forms";
+import { FormErrors, unreachable } from "../forms";
 import HealthStatus from "../HealthStatus";
 import { formatPhoneNumber } from "../phone";
 
@@ -26,7 +26,7 @@ export default function HomePage() {
       setUser(null);
       navigate("/login", { replace: true });
     } catch {
-      setErrors(UNREACHABLE);
+      setErrors(unreachable());
     }
   }
 

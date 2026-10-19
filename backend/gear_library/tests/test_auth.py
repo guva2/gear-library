@@ -55,16 +55,20 @@ def me_payload(user):
     }
 
 
-def insert_rival_signup_after_the_duplicate_check(monkeypatch):
-    """Commits a user with PHONE once the view has checked for duplicates, as a
-    concurrent signup for the same number would."""
-    check_password = views.validate_password
+def insert_rival_signup_before_create(monkeypatch):
+    """Adds a second user with PHONE as the view opens its create transaction, after
+    every check the view makes first. The test connection already holds the row
+    when the insert runs. Returns a list that records each insert."""
+    inserted = []
+    atomic = views.transaction.atomic
 
-    def check_then_insert(password, user=None, password_validators=None):
-        check_password(password, user, password_validators)
+    def insert_then_atomic(*args, **kwargs):
         User(phone_number=PHONE, first_name="Rival", last_name="Signup").save()
+        inserted.append(True)
+        return atomic(*args, **kwargs)
 
-    monkeypatch.setattr(views, "validate_password", check_then_insert)
+    monkeypatch.setattr(views.transaction, "atomic", insert_then_atomic)
+    return inserted
 
 
 @pytest.mark.django_db
@@ -177,8 +181,8 @@ class TestRegister:
     def test_duplicate_inserted_after_full_clean_hits_the_unique_index(
         self, client, monkeypatch
     ):
-        insert_rival_signup_after_the_duplicate_check(monkeypatch)
-        # The rival's insert also lands after full_clean's own uniqueness check.
+        inserted = insert_rival_signup_before_create(monkeypatch)
+        # Skip full_clean's uniqueness check so the create reaches the unique index.
         monkeypatch.setattr(User, "validate_unique", lambda self, exclude=None: None)
 
         response = client.post(REGISTER_URL, REGISTRATION, format="json")
@@ -188,11 +192,12 @@ class TestRegister:
             "phone_number": ["A user with this phone number already exists."]
         }
         assert User.objects.count() == 1
+        assert inserted
 
     def test_duplicate_inserted_before_full_clean_is_reported_on_its_field(
         self, client, monkeypatch
     ):
-        insert_rival_signup_after_the_duplicate_check(monkeypatch)
+        inserted = insert_rival_signup_before_create(monkeypatch)
 
         response = client.post(REGISTER_URL, REGISTRATION, format="json")
 
@@ -201,6 +206,7 @@ class TestRegister:
             "phone_number": ["A user with this phone number already exists."]
         }
         assert User.objects.count() == 1
+        assert inserted
 
     def test_refuses_a_logged_in_caller(self, client, user):
         client.force_login(user)
