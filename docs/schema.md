@@ -78,9 +78,30 @@ accepted. Only an `active` row makes the user a member.
   - `owner`: also removes members, sets any member's role, removes any item from the
     inventory, renames the inventory and deletes it.
 
+### `Connection` (`gear_library_connection`)
+
+Built in M5. Two users who are connected, or a request from one of them to the other. One
+row per pair of users.
+
+| Column | Type | Rules |
+|---|---|---|
+| `first_user_id` | → `User` | `on_delete=models.PROTECT`. The user with the lower id. |
+| `second_user_id` | → `User` | `on_delete=models.PROTECT`. The user with the higher id. |
+| `requested_by_id` | → `User` | `on_delete=models.PROTECT`. The user who sent the request. |
+| `status` | `varchar(8)` | `pending` or `accepted`. |
+| `created_at` | `timestamptz` | |
+
+- Check: `first_user_id < second_user_id`. A pair is stored in one order only, and a user
+  cannot connect to themselves.
+- Check: `requested_by_id` is `first_user_id` or `second_user_id`.
+- Unique on (`first_user_id`, `second_user_id`): one row per pair, pending or accepted,
+  whichever user sent the request.
+- There is no history. Declining, cancelling and removing delete the row, and then either
+  user can send a new request.
+
 ### `Item` (`gear_library_item`)
 
-Built in M5. A piece of gear. A user owns it, and it can be listed in several inventories.
+Built in M7. A piece of gear. A user owns it, and it can be listed in several inventories.
 It is one physical object, so its loan state is on this row, not per inventory.
 
 | Column | Type | Rules |
@@ -102,7 +123,7 @@ It is one physical object, so its loan state is on this row, not per inventory.
 
 ### `InventoryItem` (`gear_library_inventoryitem`)
 
-Built in M5. An item listed in an inventory.
+Built in M7. An item listed in an inventory.
 
 | Column | Type | Rules |
 |---|---|---|
@@ -119,8 +140,8 @@ These rules span tables, so the database cannot check them alone.
 ### Users
 
 - The app never deletes or deactivates a user. `is_active` stays `true`. The `PROTECT`
-  foreign keys make an ORM delete fail for a user who has memberships or items, or who
-  is the `invited_by` of a membership.
+  foreign keys make an ORM delete fail for a user who has memberships, connections or
+  items, or who is the `invited_by` of a membership.
 
 ### Concurrency
 
@@ -150,6 +171,15 @@ These rules span tables, so the database cannot check them alone.
   inventory was deleted first gets `404`. An invite that commits while a delete holds the
   inventory lock waits for the delete, then gets `404`. A delete that starts after an
   invite commits deletes the new pending membership with the inventory.
+- Connection changes take no explicit lock. Requesting inserts a pending row. When the
+  unique index on the pair refuses it, the request accepts the other user's pending
+  request with one conditional update (`status = 'pending'` and `requested_by_id` is the
+  other user), and otherwise gets `409`. Two users who request each other at once: the
+  second insert waits on the index until the first commits, then accepts it.
+- Accepting a request is one conditional update where `status = 'pending'`. Declining and
+  cancelling are each one conditional delete where `status = 'pending'`, and removing is
+  one where `status = 'accepted'`. If no row matches, a row that is gone gets `404` and a
+  row in the other status gets `409`.
 - These operations first lock the inventory's row (`select_for_update`): every change to
   its listings, and every borrow request, approve, decline, cancel or mark returned
   through it. An operation that touches several inventories, such as deleting an item
@@ -193,6 +223,18 @@ These rules span tables, so the database cannot check them alone.
   phone number only: the invitee's name and user id stay hidden until they join.
 - An invitee sees their own pending invites, with the inventory's name and the inviter's
   name, without becoming a member.
+
+### Connections
+
+- A user sends a request by the other user's phone number, never to their own.
+- A request to a user whose own request to you is pending accepts that request: the two
+  are connected at once.
+- The requester cancels a pending request, and the other user accepts or declines it.
+  Either user removes an accepted connection.
+- Only the two users of a connection see it. Anyone else gets `404`, whether it is
+  pending, accepted or gone.
+- Connected users see each other's id, first and last name, and phone number. A pending
+  request, sent or received, shows the other user's first and last name only.
 
 ### Listings
 

@@ -13,6 +13,9 @@ number of inventories, and you have one role in each:
 
 The full rights of each role are in [`docs/schema.md`](docs/schema.md).
 
+You connect with other users by phone number: send a request, and they accept or decline
+it. Connected users see each other's name and phone number.
+
 Runs locally with Docker Compose: PostgreSQL, a Django REST Framework backend and a Vite +
 React frontend. The database design is in [`docs/schema.md`](docs/schema.md) and the API
 draft is in [`docs/api.md`](docs/api.md).
@@ -83,9 +86,10 @@ missing.
 docker compose run --rm backend python manage.py seed_demo
 ```
 
-creates three demo users and two inventories. Running it again changes nothing: users
-that already exist are left as they are, and a demo inventory is skipped when its owner
-below is already in an inventory with that name. Log in at <http://localhost:5173> with any
+creates three demo users, two inventories and the users' connections. Running it again
+changes nothing: users that already exist are left as they are, a demo inventory is skipped
+when its owner below is already in an inventory with that name, and a demo connection is
+skipped when the two users already have a connection or a request. Log in at <http://localhost:5173> with any
 of them, using the password `gear-library-demo`:
 
 | Phone number | Name | Climbing Club | Camping Crew |
@@ -93,3 +97,9 @@ of them, using the password `gear-library-demo`:
 | (555) 555-0101 | Avery Brooks | owner | pending invite from Sam, not a member yet |
 | (555) 555-0102 | Jordan Diaz | admin | owner |
 | (555) 555-0103 | Sam Okafor | member | admin |
+
+Connections:
+
+- Avery and Jordan are connected.
+- Jordan and Sam are connected.
+- Sam has sent Avery a request, which is pending.

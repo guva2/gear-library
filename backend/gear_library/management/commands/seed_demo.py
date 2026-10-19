@@ -2,7 +2,15 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from gear_library.models import Inventory, Membership, MembershipStatus, Role
+from gear_library.models import (
+    Connection,
+    ConnectionStatus,
+    Inventory,
+    Membership,
+    MembershipStatus,
+    Role,
+    ordered_pair,
+)
 
 DEMO_PASSWORD = "gear-library-demo"
 
@@ -29,11 +37,18 @@ DEMO_INVENTORIES = [
     },
 ]
 
+# (requested by, other user, status). A later run skips a pair that already has a row.
+DEMO_CONNECTIONS = [
+    (AVERY, JORDAN, ConnectionStatus.ACCEPTED),
+    (JORDAN, SAM, ConnectionStatus.ACCEPTED),
+    (SAM, AVERY, ConnectionStatus.PENDING),
+]
+
 
 class Command(BaseCommand):
     help = (
-        "Create the demo users and their inventories. Users and demo inventories that "
-        "already exist are left unchanged."
+        "Create the demo users, their inventories and their connections. Users, demo "
+        "inventories and connected pairs that already exist are left unchanged."
     )
 
     @transaction.atomic
@@ -81,3 +96,16 @@ class Command(BaseCommand):
             created += 1
         existing = len(DEMO_INVENTORIES) - created
         self.stdout.write(f"Created {created} demo inventories; {existing} already existed.")
+
+        created = 0
+        for requested_by, other, status in DEMO_CONNECTIONS:
+            requester, other_user = users[requested_by], users[other]
+            if Connection.objects.between(requester, other_user).exists():
+                continue
+            first, second = ordered_pair(requester, other_user)
+            Connection.objects.create(
+                first_user=first, second_user=second, requested_by=requester, status=status
+            )
+            created += 1
+        existing = len(DEMO_CONNECTIONS) - created
+        self.stdout.write(f"Created {created} demo connections; {existing} already existed.")

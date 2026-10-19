@@ -7,7 +7,7 @@ from django.db import connection, connections, transaction
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from gear_library import inventories
-from gear_library.inventories import Conflict
+from gear_library.errors import Conflict
 from gear_library.models import Inventory, Membership
 
 User = get_user_model()

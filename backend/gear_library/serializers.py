@@ -89,7 +89,7 @@ class InventoryInviteSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class NewInviteSerializer(serializers.Serializer):
+class PhoneNumberSerializer(serializers.Serializer):
     phone_number = PhoneNumberField()
 
 
@@ -103,3 +103,29 @@ class MyInviteSerializer(serializers.ModelSerializer):
         model = Membership
         fields = ["id", "inventory_name", "invited_by"]
         read_only_fields = fields
+
+
+class _ConnectionSerializer(serializers.Serializer):
+    """A connection as one of its two users sees it: `user` is the other one. Pass the
+    caller as `context["user"]`."""
+
+    person_serializer = None
+
+    id = serializers.IntegerField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    user = serializers.SerializerMethodField()
+
+    def get_user(self, connection):
+        return self.person_serializer(connection.other_user(self.context["user"])).data
+
+
+class ConnectionSerializer(_ConnectionSerializer):
+    """An accepted connection, with the other user's id, name and phone number."""
+
+    person_serializer = UserSerializer
+
+
+class ConnectionRequestSerializer(_ConnectionSerializer):
+    """A pending request, sent or received. The other user appears by name only."""
+
+    person_serializer = PersonNameSerializer

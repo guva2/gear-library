@@ -25,9 +25,9 @@ import functools
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection, transaction
-from rest_framework import status
-from rest_framework.exceptions import APIException, NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
+from .errors import Conflict, violates
 from .models import ONE_MEMBERSHIP_PER_USER, Inventory, Membership, MembershipStatus, Role
 
 User = get_user_model()
@@ -45,12 +45,6 @@ LAST_OWNER = "An inventory must keep at least one owner."
 NO_SUCH_USER = "No user has this phone number."
 NOT_PENDING = "This is not a pending invite."
 ALREADY_IN = "This user is already a member or has a pending invite."
-
-
-class Conflict(APIException):
-    status_code = status.HTTP_409_CONFLICT
-    default_detail = "The request conflicts with the current state."
-    default_code = "conflict"
 
 
 def has_role(membership, role):
@@ -72,12 +66,6 @@ def get_membership(user, inventory_id, role=Role.MEMBER):
     if not has_role(membership, role):
         raise PermissionDenied(ROLE_REQUIRED[role])
     return membership
-
-
-def _violates(error, *constraints):
-    """True when the database raised `error` for one of the constraints named."""
-    diag = getattr(error.__cause__, "diag", None)
-    return diag is not None and diag.constraint_name in constraints
 
 
 @functools.cache
@@ -198,9 +186,9 @@ def invite(actor, phone_number):
                 invited_by_id=actor.user_id,
             )
     except IntegrityError as error:
-        if _violates(error, ONE_MEMBERSHIP_PER_USER):
+        if violates(error, ONE_MEMBERSHIP_PER_USER):
             raise Conflict(ALREADY_IN)
-        if _violates(error, _inventory_foreign_key()):
+        if violates(error, _inventory_foreign_key()):
             raise NotFound(INVENTORY_NOT_FOUND)
         raise
 

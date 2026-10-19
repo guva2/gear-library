@@ -7,6 +7,7 @@ from django.db import models
 PHONE_NUMBER_PATTERN = r"^[0-9]{10}$"
 
 ONE_MEMBERSHIP_PER_USER = "gear_library_membership_one_per_user"
+ONE_CONNECTION_PER_PAIR = "gear_library_connection_one_per_pair"
 
 
 class UserManager(BaseUserManager):
@@ -131,3 +132,65 @@ class Membership(models.Model):
                 fields=["inventory", "user"], name=ONE_MEMBERSHIP_PER_USER
             ),
         ]
+
+
+def ordered_pair(user, other):
+    """The two users in the order a `Connection` stores them: lower id first."""
+    return (user, other) if user.pk < other.pk else (other, user)
+
+
+class ConnectionStatus(models.TextChoices):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+
+
+class ConnectionQuerySet(models.QuerySet):
+    def between(self, user, other):
+        first, second = ordered_pair(user, other)
+        return self.filter(first_user=first, second_user=second)
+
+    def involving(self, user):
+        return self.filter(models.Q(first_user=user) | models.Q(second_user=user))
+
+    def pending(self):
+        return self.filter(status=ConnectionStatus.PENDING)
+
+    def accepted(self):
+        return self.filter(status=ConnectionStatus.ACCEPTED)
+
+
+class Connection(models.Model):
+    """Two users, once per pair. `pending` is a request from `requested_by` to the other
+    user; `accepted` connects them both ways."""
+
+    first_user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+")
+    second_user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+")
+    requested_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+")
+    status = models.CharField(max_length=8, choices=ConnectionStatus.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ConnectionQuerySet.as_manager()
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(first_user__lt=models.F("second_user")),
+                name="gear_library_connection_ordered_pair",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(requested_by=models.F("first_user"))
+                | models.Q(requested_by=models.F("second_user")),
+                name="gear_library_connection_requested_by_a_user",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=ConnectionStatus.values),
+                name="gear_library_connection_status_valid",
+            ),
+            models.UniqueConstraint(
+                fields=["first_user", "second_user"], name=ONE_CONNECTION_PER_PAIR
+            ),
+        ]
+
+    def other_user(self, user):
+        """The user of the pair who is not `user`."""
+        return self.second_user if self.first_user_id == user.id else self.first_user

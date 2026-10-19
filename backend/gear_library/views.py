@@ -14,18 +14,20 @@ from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
 
-from . import inventories
+from . import connections, inventories
 from .authentication import CsrfSessionAuthentication
-from .models import Membership, Role
+from .models import Connection, ConnectionStatus, Membership, Role
 from .serializers import (
+    ConnectionRequestSerializer,
+    ConnectionSerializer,
     InventoryInviteSerializer,
     InventoryNameSerializer,
     InventorySerializer,
     LoginSerializer,
     MemberSerializer,
     MyInviteSerializer,
-    NewInviteSerializer,
     PersonNameSerializer,
+    PhoneNumberSerializer,
     RegisterSerializer,
     RoleSerializer,
     UserSerializer,
@@ -194,7 +196,7 @@ def member_detail(request, inventory_id, user_id):
 def inventory_invites(request, inventory_id):
     actor = inventories.get_membership(request.user, inventory_id, Role.ADMIN)
     if request.method == "POST":
-        phone_number = _validated(NewInviteSerializer, request)["phone_number"]
+        phone_number = _validated(PhoneNumberSerializer, request)["phone_number"]
         invite = inventories.invite(actor, phone_number)
         return Response(InventoryInviteSerializer(invite).data, status=status.HTTP_201_CREATED)
     invites = (
@@ -232,4 +234,71 @@ def decline_invite(request, invite_id):
 @api_view(["POST"])
 def revoke_invite(request, invite_id):
     inventories.revoke_invite(request.user, invite_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _connection_data(connection, user):
+    if connection.status == ConnectionStatus.ACCEPTED:
+        return ConnectionSerializer(connection, context={"user": user}).data
+    return ConnectionRequestSerializer(connection, context={"user": user}).data
+
+
+def _connections_of(user):
+    return Connection.objects.involving(user).select_related("first_user", "second_user")
+
+
+@api_view(["GET", "POST"])
+def connection_list(request):
+    if request.method == "POST":
+        phone_number = _validated(PhoneNumberSerializer, request)["phone_number"]
+        connection = connections.request_connection(request.user, phone_number)
+        code = status.HTTP_200_OK
+        if connection.status == ConnectionStatus.PENDING:
+            code = status.HTTP_201_CREATED
+        return Response(_connection_data(connection, request.user), status=code)
+
+    def by_name(connection):
+        other = connection.other_user(request.user)
+        return (other.last_name, other.first_name, other.id)
+
+    accepted = sorted(_connections_of(request.user).accepted(), key=by_name)
+    context = {"user": request.user}
+    return Response(ConnectionSerializer(accepted, many=True, context=context).data)
+
+
+@api_view(["GET"])
+def connection_requests(request):
+    pending = list(_connections_of(request.user).pending().order_by("created_at", "id"))
+    sent = [c for c in pending if c.requested_by_id == request.user.id]
+    received = [c for c in pending if c.requested_by_id != request.user.id]
+    context = {"user": request.user}
+    return Response(
+        {
+            "received": ConnectionRequestSerializer(received, many=True, context=context).data,
+            "sent": ConnectionRequestSerializer(sent, many=True, context=context).data,
+        }
+    )
+
+
+@api_view(["DELETE"])
+def connection_detail(request, connection_id):
+    connections.remove(request.user, connection_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["POST"])
+def accept_connection(request, connection_id):
+    connection = connections.accept(request.user, connection_id)
+    return Response(_connection_data(connection, request.user))
+
+
+@api_view(["POST"])
+def decline_connection(request, connection_id):
+    connections.decline(request.user, connection_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["POST"])
+def cancel_connection(request, connection_id):
+    connections.cancel(request.user, connection_id)
     return Response(status=status.HTTP_204_NO_CONTENT)
