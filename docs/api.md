@@ -208,7 +208,7 @@ first.
 | Field | Type | |
 |---|---|---|
 | `id` | integer | |
-| `invitee` | object | `id`, `first_name`, `last_name` and `phone_number` (10 digits). |
+| `invitee` | object | Only `phone_number` (10 digits). The name and user id appear in the members list once the invitee has joined. |
 | `invited_by` | object | `first_name` and `last_name`. |
 
 #### `POST /api/inventories/{id}/invites/`

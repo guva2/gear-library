@@ -164,7 +164,8 @@ These rules span tables, so the database cannot check them alone.
   sees it. A borrower also sees the item they hold.
 - A `member` sees only the first and last names of the inventory's admins and owners: not
   the other members, and no phone numbers. Admins and owners see every member with name,
-  phone number and role, and every pending invite of the inventory.
+  phone number and role. They see each pending invite of the inventory with the invitee's
+  phone number only: the invitee's name and user id stay hidden until they join.
 - An invitee sees their own pending invites, with the inventory's name and the inviter's
   name, without becoming a member.
 

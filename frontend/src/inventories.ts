@@ -29,7 +29,7 @@ export interface Member extends PersonName {
 
 export interface InventoryInvite {
   id: number;
-  invitee: PersonName & { id: number; phone_number: string };
+  invitee: { phone_number: string };
   invited_by: PersonName;
 }
 

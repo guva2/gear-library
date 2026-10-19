@@ -287,12 +287,7 @@ class TestInventoryInvites:
         invite = InventoryInvite.objects.get()
         assert response.json() == {
             "id": invite.id,
-            "invitee": {
-                "id": people["stranger"].id,
-                "first_name": "Stan",
-                "last_name": "L4",
-                "phone_number": "5551230004",
-            },
+            "invitee": {"phone_number": "5551230004"},
             "invited_by": name_of(people[actor]),
         }
 
@@ -332,7 +327,15 @@ class TestInventoryInvites:
         response = client_for(people[actor]).get(inventory_url(people["inventory"], "invites/"))
 
         assert response.status_code == 200
-        assert [i["invitee"]["id"] for i in response.json()] == [people["stranger"].id]
+        assert [i["invitee"] for i in response.json()] == [{"phone_number": "5551230004"}]
+
+    def test_a_pending_invite_shows_the_invitee_only_by_phone_number(self, people):
+        created = self.invite(people, "owner", "5551230004").json()
+        listed = client_for(people["owner"]).get(inventory_url(people["inventory"], "invites/"))
+
+        for body in [created, *listed.json()]:
+            assert set(body["invitee"]) == {"phone_number"}
+            assert "Stan" not in str(body)
 
     def test_a_member_cannot_list_invites(self, people):
         url = inventory_url(people["inventory"], "invites/")
@@ -416,6 +419,18 @@ class TestMyInvites:
 
         for user in [people["member"], outsider]:
             assert self.answer(user, invite, action).status_code == 404
+
+    @pytest.mark.parametrize("action", ["accept", "decline", "revoke"])
+    @pytest.mark.parametrize("status", ["declined", "revoked"])
+    @pytest.mark.parametrize("viewer", ["member", "outsider"])
+    def test_a_non_party_cannot_tell_a_finished_invite_from_an_unknown_one(
+        self, people, invite, action, status, viewer
+    ):
+        invite.status = status
+        invite.save()
+        user = people["member"] if viewer == "member" else make_user(6)
+
+        assert self.answer(user, invite, action).status_code == 404
 
     def test_the_invitee_cannot_revoke_and_an_admin_cannot_accept(self, people, invite):
         assert self.answer(people["stranger"], invite, "revoke").status_code == 403

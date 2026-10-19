@@ -133,7 +133,8 @@ def remove_member(user, inventory_id, member_user_id):
 @transaction.atomic
 def invite(user, inventory_id, phone_number):
     """Invites the user with `phone_number`. The caller's role is checked before the
-    number is looked up, so only admins and owners learn whether it has an account."""
+    number is looked up, so a plain member or outsider learns nothing. An admin or owner
+    can still tell whether a number has an account: an unknown one is a `ValidationError`."""
     actor = _lock_as(user, inventory_id, Role.ADMIN)
     invitee = User.objects.filter(phone_number=phone_number).first()
     if invitee is None:

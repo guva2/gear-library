@@ -257,14 +257,13 @@ function Invites({ invites, send, base, reload, onRevoke }: InvitesProps) {
             <li key={invite.id}>
               <span>
                 {[
-                  fullName(invite.invitee),
                   formatPhoneNumber(invite.invitee.phone_number),
                   `invited by ${fullName(invite.invited_by)}`,
                 ].join(", ")}
               </span>{" "}
               <button
                 type="button"
-                aria-label={`Revoke invite for ${fullName(invite.invitee)}`}
+                aria-label={`Revoke invite for ${formatPhoneNumber(invite.invitee.phone_number)}`}
                 onClick={() => onRevoke(invite)}
               >
                 Revoke

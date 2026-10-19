@@ -13,7 +13,7 @@ const BOB = { id: 2, first_name: "Bob", last_name: "Stone", phone_number: "55512
 const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5551230003" };
 const INVITE = {
   id: 40,
-  invitee: { id: 4, first_name: "Ivy", last_name: "Park", phone_number: "5551230004" },
+  invitee: { phone_number: "5551230004" },
   invited_by: { first_name: "Bob", last_name: "Stone" },
 };
 
@@ -97,8 +97,8 @@ describe("as an admin", () => {
       "Bob Stone(555) 123-0002admin",
       "Mia Lee(555) 123-0003member",
     ]);
-    expect(within(region("Pending invites")).getByText(/Ivy Park/)).toHaveTextContent(
-      "Ivy Park, (555) 123-0004, invited by Bob Stone",
+    expect(within(region("Pending invites")).getByText(/123-0004/)).toHaveTextContent(
+      "(555) 123-0004, invited by Bob Stone",
     );
   });
 
@@ -125,7 +125,7 @@ describe("as an admin", () => {
     fillIn("Phone number", "(555) 123-0004");
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
-    expect(await within(region("Pending invites")).findByText(/Ivy Park/)).toBeInTheDocument();
+    expect(await within(region("Pending invites")).findByText(/123-0004/)).toBeInTheDocument();
     expect(backend.requests(`POST ${URL}invites/`)).toEqual([{ phone_number: "(555) 123-0004" }]);
     expect(screen.getByLabelText("Phone number")).toHaveValue("");
   });
@@ -170,7 +170,7 @@ describe("as an admin", () => {
     });
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Revoke invite for Ivy Park" }));
+    fireEvent.click(screen.getByRole("button", { name: "Revoke invite for (555) 123-0004" }));
 
     expect(await screen.findByText("No pending invites.")).toBeInTheDocument();
     expect(backend.requests("POST /api/invites/40/revoke/")).toHaveLength(1);

@@ -69,10 +69,18 @@ class RoleSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=Role.choices)
 
 
-class InventoryInviteSerializer(serializers.ModelSerializer):
-    """A pending invite as the inventory's admins and owners see it."""
+class InviteeNumberSerializer(serializers.Serializer):
+    phone_number = serializers.CharField(read_only=True)
 
-    invitee = UserSerializer(read_only=True)
+
+class InventoryInviteSerializer(serializers.ModelSerializer):
+    """A pending invite as the inventory's admins and owners see it.
+
+    The invitee appears by phone number only: a name or user id would let any inventory
+    owner look up who holds a number.
+    """
+
+    invitee = InviteeNumberSerializer(read_only=True)
     invited_by = PersonNameSerializer(read_only=True)
 
     class Meta:
