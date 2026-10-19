@@ -390,6 +390,14 @@ class TestMyInvites:
             "role": "member",
         }
 
+    def test_accepting_twice_returns_the_inventory_again(self, people, invite):
+        first = self.answer(people["stranger"], invite, "accept")
+
+        again = self.answer(people["stranger"], invite, "accept")
+
+        assert again.status_code == 200
+        assert again.json() == first.json()
+
     def test_declining(self, people, invite):
         response = self.answer(people["stranger"], invite, "decline")
 

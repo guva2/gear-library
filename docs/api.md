@@ -121,7 +121,7 @@ No body. `204` with no body. The session ends.
 | `POST` | `/api/inventories/` | Logged in. The caller becomes its owner. | `400` |
 | `GET` | `/api/inventories/{id}/` | Member. | `404` |
 | `PATCH` | `/api/inventories/{id}/` | Owner. Renames it. | `400`, `403`, `404` |
-| `DELETE` | `/api/inventories/{id}/` | Owner. Deletes it with its memberships and invites. | `403`, `404` |
+| `DELETE` | `/api/inventories/{id}/` | Owner. Deletes it with its memberships and invites. | `403`, `404`, `409`: someone joined or was invited during the delete; retry. |
 
 Every endpoint under `/api/inventories/{id}/` checks the caller's membership and role
 before it reads the body: a non-member gets `404` and a member without the role gets
@@ -192,7 +192,7 @@ a lower role.
 | `POST` | `/api/inventories/{id}/invites/` | Admin. Invites a user by phone number. | `400`: invalid number, or no such user. `403`, `404`. `409`: already a member, or an invite is pending. |
 | `POST` | `/api/invites/{id}/revoke/` | Admin of the invite's inventory. Any pending invite. | `403`, `404`, `409`: not pending. |
 | `GET` | `/api/invites/` | Logged in. The caller's pending invites. | |
-| `POST` | `/api/invites/{id}/accept/` | The invitee. Joins as `member`. | `403`, `404`, `409`: not pending, or already a member. |
+| `POST` | `/api/invites/{id}/accept/` | The invitee. Joins as `member`. | `403`, `404`, `409`: declined, revoked, or accepted by someone who has since left. |
 | `POST` | `/api/invites/{id}/decline/` | The invitee. | `403`, `404`, `409`: not pending. |
 
 Under `/api/invites/{id}/`, an invite is visible only to its invitee and to the admins and
@@ -240,9 +240,12 @@ so it carries only the inventory's name.
 #### Answering an invite
 
 The three `POST /api/invites/{id}/` actions take no body. `accept` returns `200` with the
-[Inventory](#inventory) just joined, whose `role` is `member`. `decline` and `revoke`
-return `204` with no body. An invite that was already accepted, declined or revoked is a
-`409` `{"detail": "This invite is no longer pending."}`.
+[Inventory](#inventory) just joined, whose `role` is `member`. Accepting is idempotent:
+an invitee who is already a member keeps their membership and role and gets the same
+`200`, and the invite is marked accepted. Accepting an accepted invite again returns `200`
+while the invitee is still a member. `decline` and `revoke` return `204` with no body. Any
+other answer to an invite that is no longer pending is a `409`
+`{"detail": "This invite is no longer pending."}`.
 
 ## Gear (M5)
 

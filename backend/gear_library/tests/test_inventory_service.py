@@ -1,5 +1,9 @@
+import threading
+import time
+
 import pytest
 from django.contrib.auth import get_user_model
+from django.db import connection, connections
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from gear_library import inventories
@@ -131,6 +135,17 @@ class TestSetRole:
     def test_a_user_who_is_not_a_member_is_not_found(self, inventory, owner):
         with pytest.raises(NotFound):
             self.set_role(owner, inventory, make_user(9), "admin")
+
+    def test_an_actor_demoted_since_the_check_is_forbidden(self, inventory, owner):
+        member = join(inventory, "member", 2)
+        actor = as_(owner, inventory, "owner")
+        other_owner = join(inventory, "owner", 3)
+        Membership.objects.filter(inventory=inventory, user=owner).update(role="admin")
+
+        with pytest.raises(PermissionDenied):
+            inventories.set_role(actor, member.id, "admin")
+        assert role_of(inventory, member) == "member"
+        assert role_of(inventory, other_owner) == "owner"
 
     def test_a_member_removed_since_it_was_read_is_not_found(
         self, inventory, owner, monkeypatch
@@ -267,16 +282,37 @@ class TestAnswerInvite:
             answer(invitee, invite.id)
         assert self.status(invite) == "revoked"
 
-    def test_accepting_as_a_member_conflicts_and_leaves_the_invite_pending(
+    def test_accepting_as_a_member_accepts_and_keeps_the_membership(
         self, inventory, invitee, invite
     ):
-        Membership.objects.create(inventory=inventory, user=invitee, role="admin")
+        existing = Membership.objects.create(inventory=inventory, user=invitee, role="admin")
+
+        membership = inventories.accept_invite(invitee, invite.id)
+
+        assert (membership.pk, membership.role) == (existing.pk, "admin")
+        assert Membership.objects.filter(user=invitee).count() == 1
+        assert self.status(invite) == "accepted"
+
+    def test_accepting_an_accepted_invite_again_returns_the_membership(
+        self, inventory, invitee, invite
+    ):
+        first = inventories.accept_invite(invitee, invite.id)
+
+        again = inventories.accept_invite(invitee, invite.id)
+
+        assert (again.pk, again.role) == (first.pk, "member")
+        assert self.status(invite) == "accepted"
+
+    def test_accepting_an_accepted_invite_after_leaving_conflicts(
+        self, inventory, invitee, invite
+    ):
+        inventories.accept_invite(invitee, invite.id)
+        inventories.remove_member(invitee, inventory.id, invitee.id)
 
         with pytest.raises(Conflict) as excinfo:
             inventories.accept_invite(invitee, invite.id)
-        assert excinfo.value.detail == "You are already a member."
-        assert role_of(inventory, invitee) == "admin"
-        assert self.status(invite) == "pending"
+        assert excinfo.value.detail == "This invite is no longer pending."
+        assert not Membership.objects.filter(user=invitee).exists()
 
     @pytest.mark.parametrize(
         "action, by",
@@ -304,6 +340,32 @@ class TestAnswerInvite:
             action(user, invite.id)
         assert excinfo.value.detail == "This invite is no longer pending."
         assert self.status(invite) == finished
+        assert not Membership.objects.filter(user=invitee).exists()
+
+    @pytest.mark.parametrize(
+        "action, by",
+        [
+            (inventories.accept_invite, "invitee"),
+            (inventories.decline_invite, "invitee"),
+            (inventories.revoke_invite, "owner"),
+        ],
+    )
+    def test_an_invite_whose_inventory_was_deleted_after_it_was_read_is_not_found(
+        self, inventory, invitee, owner, invite, monkeypatch, action, by
+    ):
+        invite_for = inventories._invite_for
+
+        def delete_after_reading(*args, **kwargs):
+            found = invite_for(*args, **kwargs)
+            Inventory.objects.filter(pk=inventory.pk).delete()
+            return found
+
+        monkeypatch.setattr(inventories, "_invite_for", delete_after_reading)
+        user = invitee if by == "invitee" else owner
+
+        with pytest.raises(NotFound) as excinfo:
+            action(user, invite.id)
+        assert excinfo.value.detail == "Invite not found."
         assert not Membership.objects.filter(user=invitee).exists()
 
     @pytest.mark.parametrize("answer", [inventories.accept_invite, inventories.decline_invite])
@@ -361,3 +423,250 @@ class TestAnswerInvite:
 
         with pytest.raises(NotFound):
             inventories.accept_invite(invitee, invite.id)
+
+
+def wait_for_a_blocked_lock(timeout=5.0):
+    """Waits until another connection to this database is waiting on a row lock."""
+    deadline = time.monotonic() + timeout
+    with connection.cursor() as cursor:
+        while time.monotonic() < deadline:
+            cursor.execute(
+                "SELECT count(*) FROM pg_stat_activity"
+                " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+            )
+            if cursor.fetchone()[0] > 0:
+                return
+            time.sleep(0.02)
+    raise AssertionError("the second request never waited on a lock")
+
+
+def run_in_thread(name, action, outcomes):
+    """Runs `action` on its own database connection, recording "ok" or the error raised."""
+
+    def target():
+        try:
+            action()
+            outcomes[name] = "ok"
+        except Exception as error:
+            outcomes[name] = error
+        finally:
+            connections.close_all()
+
+    thread = threading.Thread(target=target, name=name)
+    thread.start()
+    return thread
+
+
+def hold_after_joining(monkeypatch, thread_name, joined, release):
+    """Makes the accept in thread `thread_name` set `joined` after it adds the membership,
+    then wait for `release` before it commits."""
+    join_inventory = inventories._join
+
+    def hold(*args, **kwargs):
+        membership = join_inventory(*args, **kwargs)
+        if threading.current_thread().name == thread_name:
+            joined.set()
+            assert release.wait(10)
+        return membership
+
+    monkeypatch.setattr(inventories, "_join", hold)
+
+
+def step_down(user, inventory):
+    def action():
+        actor = inventories.get_membership(user, inventory.id, "owner")
+        inventories.set_role(actor, user.id, "member")
+
+    return action
+
+
+def leave(user, inventory):
+    return lambda: inventories.remove_member(user, inventory.id, user.id)
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    "first_action, second_action",
+    [(step_down, step_down), (leave, step_down), (step_down, leave)],
+)
+def test_two_owners_giving_up_ownership_at_once_leave_one_owner(
+    monkeypatch, first_action, second_action
+):
+    """The first owner's change holds the inventory lock until the second owner's change
+    is queued behind it. The second one then counts the owners again and is refused."""
+    first = make_user(1)
+    inventory = inventories.create_inventory(first, "Climbing").inventory
+    second = join(inventory, "owner", 2)
+
+    locked = threading.Event()
+    release = threading.Event()
+    lock_inventory = inventories._lock_inventory
+
+    def hold_lock_for_first(inventory_id):
+        result = lock_inventory(inventory_id)
+        if threading.current_thread().name == "first":
+            locked.set()
+            assert release.wait(10)
+        return result
+
+    monkeypatch.setattr(inventories, "_lock_inventory", hold_lock_for_first)
+    outcomes = {}
+
+    threads = [run_in_thread("first", first_action(first, inventory), outcomes)]
+    assert locked.wait(10)
+    threads.append(run_in_thread("second", second_action(second, inventory), outcomes))
+    try:
+        wait_for_a_blocked_lock()
+    finally:
+        release.set()
+        for thread in threads:
+            thread.join(10)
+
+    assert outcomes["first"] == "ok"
+    assert isinstance(outcomes["second"], Conflict)
+    assert owner_count(inventory) == 1
+    assert role_of(inventory, second) == "owner"
+
+
+@pytest.mark.django_db(transaction=True)
+class TestCommittedRaces:
+    """These tests commit for real: membership and invite foreign keys are checked at
+    commit, and an insert waiting on a unique index learns the outcome only then."""
+
+    @pytest.fixture
+    def owner(self):
+        return make_user(1, "Olive")
+
+    @pytest.fixture
+    def inventory(self, owner):
+        return inventories.create_inventory(owner, "Climbing").inventory
+
+    def test_inviting_to_an_inventory_deleted_since_the_check_is_not_found(
+        self, inventory, owner
+    ):
+        actor = as_(owner, inventory, "admin")
+        Inventory.objects.filter(pk=inventory.pk).delete()
+
+        with pytest.raises(NotFound) as excinfo:
+            inventories.invite(actor, make_user(3).phone_number)
+        assert excinfo.value.detail == "Inventory not found."
+        assert not InventoryInvite.objects.exists()
+
+    def test_a_delete_that_loses_to_an_invite_conflicts_and_deletes_nothing(
+        self, inventory, owner
+    ):
+        """The invite commits after the delete has removed the inventory's invites but
+        before it removes the inventory row."""
+        invitee = make_user(3)
+        outcomes = {}
+
+        def invite_before_the_inventory_row_goes(execute, sql, params, many, context):
+            if sql.startswith('DELETE FROM "gear_library_inventory" '):
+                action = lambda: inventories.invite(as_(owner, inventory), invitee.phone_number)
+                run_in_thread("invite", action, outcomes).join(10)
+            return execute(sql, params, many, context)
+
+        actor = as_(owner, inventory, "owner")
+        with connection.execute_wrapper(invite_before_the_inventory_row_goes):
+            with pytest.raises(Conflict):
+                inventories.delete_inventory(actor)
+
+        assert outcomes["invite"] == "ok"
+        assert Inventory.objects.filter(pk=inventory.pk).exists()
+        assert role_of(inventory, owner) == "owner"
+        assert InventoryInvite.objects.filter(invitee=invitee, status="pending").exists()
+
+    def test_a_delete_that_loses_to_an_accept_conflicts_and_deletes_nothing(
+        self, inventory, owner, monkeypatch
+    ):
+        """The accept holds its invite row until the delete waits on it. By then the
+        delete has removed the memberships it saw, so the new one is left referring to
+        the inventory."""
+        invitee = make_user(3)
+        invite = inventories.invite(as_(owner, inventory), invitee.phone_number)
+
+        joined = threading.Event()
+        release = threading.Event()
+        hold_after_joining(monkeypatch, "accept", joined, release)
+        outcomes = {}
+        actor = as_(owner, inventory, "owner")
+
+        threads = [
+            run_in_thread("accept", lambda: inventories.accept_invite(invitee, invite.id), outcomes)
+        ]
+        assert joined.wait(10)
+        threads.append(
+            run_in_thread("delete", lambda: inventories.delete_inventory(actor), outcomes)
+        )
+        try:
+            wait_for_a_blocked_lock()
+        finally:
+            release.set()
+            for thread in threads:
+                thread.join(10)
+
+        assert outcomes["accept"] == "ok"
+        assert isinstance(outcomes["delete"], Conflict)
+        assert role_of(inventory, invitee) == "member"
+        assert role_of(inventory, owner) == "owner"
+
+    def test_an_accept_whose_inventory_is_gone_at_commit_is_not_found(
+        self, inventory, owner, monkeypatch
+    ):
+        """The invite row lock makes a delete wait for the accept, so this simulates the
+        inventory vanishing at commit: the membership refers to a missing inventory."""
+        invitee = make_user(3)
+        invite = inventories.invite(as_(owner, inventory), invitee.phone_number)
+        invite_for = inventories._invite_for
+
+        def point_at_a_missing_inventory(*args, **kwargs):
+            found = invite_for(*args, **kwargs)
+            found.inventory_id = inventory.pk + 1000
+            return found
+
+        monkeypatch.setattr(inventories, "_invite_for", point_at_a_missing_inventory)
+
+        with pytest.raises(NotFound) as excinfo:
+            inventories.accept_invite(invitee, invite.id)
+        assert excinfo.value.detail == "Invite not found."
+        invite.refresh_from_db()
+        assert invite.status == "pending"
+        assert not Membership.objects.filter(user=invitee).exists()
+
+    def test_an_invite_sent_while_an_accept_commits_can_be_accepted(
+        self, inventory, owner, monkeypatch
+    ):
+        """The second invite checks membership before the accept commits, then waits on
+        the pending-invite index until it does. The invitee ends up a member with a
+        pending invite, and accepting it succeeds."""
+        invitee = make_user(3)
+        first = inventories.invite(as_(owner, inventory), invitee.phone_number)
+
+        joined = threading.Event()
+        release = threading.Event()
+        hold_after_joining(monkeypatch, "accept", joined, release)
+        outcomes = {}
+        invited = []
+
+        threads = [
+            run_in_thread("accept", lambda: inventories.accept_invite(invitee, first.id), outcomes)
+        ]
+        assert joined.wait(10)
+        send_again = lambda: invited.append(
+            inventories.invite(as_(owner, inventory), invitee.phone_number)
+        )
+        threads.append(run_in_thread("invite", send_again, outcomes))
+        try:
+            wait_for_a_blocked_lock()
+        finally:
+            release.set()
+            for thread in threads:
+                thread.join(10)
+        assert outcomes == {"accept": "ok", "invite": "ok"}
+
+        membership = inventories.accept_invite(invitee, invited[0].id)
+
+        assert membership.role == "member"
+        assert Membership.objects.filter(inventory=inventory, user=invitee).count() == 1
+        statuses = InventoryInvite.objects.filter(invitee=invitee).values_list("status", flat=True)
+        assert list(statuses) == ["accepted", "accepted"]
