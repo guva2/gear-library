@@ -226,7 +226,7 @@ def _invite_for(user, invite_id, by_invitee):
 
 def _delete_pending(invite):
     """Deletes `invite` if it is still pending. Raises `NotFound` if it is gone and
-    `Conflict` if it was accepted."""
+    `Conflict` if it is active."""
     if Membership.objects.pending().filter(pk=invite.pk).delete()[0]:
         return
     if Membership.objects.filter(pk=invite.pk).exists():
