@@ -11,9 +11,13 @@ vi.mock("react", async (importOriginal) => {
     ...actual,
     useState: (initial: unknown) => {
       const [value, set] = actual.useState(initial);
-      const setter = vi.fn(set);
-      stateSetters.push(setter);
-      return [value, setter];
+      // One wrapper per hook instance, so the setter keeps React's stable identity.
+      const setter = actual.useRef<ReturnType<typeof vi.fn> | null>(null);
+      if (setter.current === null) {
+        setter.current = vi.fn(set);
+        stateSetters.push(setter.current);
+      }
+      return [value, setter.current];
     },
   };
 });

@@ -76,8 +76,8 @@ builds its endpoints. The roles and rules behind "who may call" are in
 | `GET` | `/api/items/` | Logged in. The caller's own items. | |
 | `POST` | `/api/items/` | Logged in. The caller owns the new item. | `400` |
 | `GET` | `/api/items/{id}/` | The item's owner, its borrower, or a member of an inventory it is listed in. | `404` |
-| `PATCH` | `/api/items/{id}/` | The item's owner. | `400`, `404` |
-| `DELETE` | `/api/items/{id}/` | The item's owner. | `404`, `409`: on loan. |
+| `PATCH` | `/api/items/{id}/` | The item's owner. | `400`. `403`: can see the item but does not own it. `404`. |
+| `DELETE` | `/api/items/{id}/` | The item's owner. | `403`: can see the item but does not own it. `404`. `409`: on loan. |
 
 ### Listings
 
@@ -96,6 +96,8 @@ builds its endpoints. The roles and rules behind "who may call" are in
 ## Borrowing (M7)
 
 A request is made through one inventory. "Loan inventory" below is that inventory.
+The approve, decline, cancel and return bodies carry the `borrower` and `loan_inventory`
+the caller saw. The `409` "the request changed" check compares them with the item.
 
 | Method | Path | Who | Main errors |
 |---|---|---|---|

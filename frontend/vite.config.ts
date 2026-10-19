@@ -1,6 +1,13 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
+const backend = {
+  target: "http://backend:8000",
+  // Pass the browser's Host header through, so the backend sees the origin the browser
+  // sees.
+  changeOrigin: false,
+};
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -9,12 +16,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api": {
-        target: "http://backend:8000",
-        // Pass the browser's Host header through, so the backend sees the origin the
-        // browser sees.
-        changeOrigin: false,
-      },
+      "/api": backend,
+      "/admin": backend,
+      "/static": backend,
     },
   },
   test: {

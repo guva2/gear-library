@@ -32,7 +32,7 @@ to check again.
 - `backend`: Django on port 8000 inside the Compose network. It waits for the database,
   applies migrations, then runs the development server.
 - `frontend`: the Vite dev server, published on `127.0.0.1:5173` only. It forwards
-  `/api` to the backend, so the browser sees one origin.
+  `/api`, `/admin` and `/static` to the backend, so the browser sees one origin.
 
 Only the frontend port is published to the host. `backend/` and `frontend/` are mounted
 into their containers, so code changes reload without a rebuild. The containers run as
@@ -48,7 +48,17 @@ docker compose run --rm backend python manage.py createsuperuser
 docker compose run --rm frontend npm install --save-exact <package>
 docker compose down                                           # stop; data stays in the volume
 docker compose down -v                                        # stop and delete the data
+docker volume prune                                           # delete unused anonymous volumes
 ```
+
+Each new frontend container gets a new anonymous volume for `node_modules`, and the volume
+stays after the container is removed. `docker volume prune` deletes the unused anonymous
+volumes of every project on this machine. It keeps named volumes such as `db-data`; only
+`--all` deletes those.
+
+The Django admin is at <http://localhost:5173/admin/>. Create a login for it with
+`createsuperuser`. The development server serves the admin's CSS only when
+`DJANGO_DEBUG=1`, as in `.env.example`.
 
 Rebuild after changing `backend/requirements.txt` or `frontend/package.json`:
 
