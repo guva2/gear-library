@@ -22,9 +22,15 @@ async function loadPage(signal: AbortSignal): Promise<PageData> {
 export default function ConnectionsPage() {
   const [page, reload] = useLoad(loadPage);
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [sent, setSent] = useState<string | null>(null);
+
+  function clearMessages() {
+    setErrors({});
+    setSent(null);
+  }
 
   async function act(path: string, method: "POST" | "DELETE") {
-    setErrors({});
+    clearMessages();
     try {
       const response = await apiFetch(path, { method });
       if (!response.ok) setErrors(await readErrors(response, []));
@@ -76,7 +82,7 @@ export default function ConnectionsPage() {
           />
         </>
       )}
-      <SendRequest reload={reload} onStart={() => setErrors({})} />
+      <SendRequest reload={reload} onStart={clearMessages} sent={sent} onSent={setSent} />
     </>
   );
 }
@@ -183,15 +189,20 @@ function RequestList<R extends { id: number }>({
   );
 }
 
-function SendRequest({ reload, onStart }: { reload: () => void; onStart: () => void }) {
+interface SendRequestProps {
+  reload: () => void;
+  onStart: () => void;
+  sent: string | null;
+  onSent: (message: string) => void;
+}
+
+function SendRequest({ reload, onStart, sent, onSent }: SendRequestProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
-  const [sent, setSent] = useState<string | null>(null);
   const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    setSent(null);
     onStart();
     try {
       const response = await apiFetch("/api/connections/", {
@@ -204,7 +215,7 @@ function SendRequest({ reload, onStart }: { reload: () => void; onStart: () => v
       }
       const result = (await response.json()) as Connection | SentRequest;
       setErrors({});
-      setSent(
+      onSent(
         result.status === "accepted"
           ? `You are now connected with ${fullName(result.user)}.`
           : `Request sent to ${formatPhoneNumber(result.user.phone_number)}.`,

@@ -135,8 +135,10 @@ class Membership(models.Model):
 
 
 def ordered_pair(user, other):
-    """The two users in the order a `Connection` stores them: lower id first."""
-    return (user, other) if user.pk < other.pk else (other, user)
+    """The ids of two users, each given as a user or a user id, in the order a
+    `Connection` stores them: lower id first."""
+    ids = [getattr(person, "pk", person) for person in (user, other)]
+    return tuple(sorted(ids))
 
 
 class ConnectionStatus(models.TextChoices):
@@ -147,7 +149,7 @@ class ConnectionStatus(models.TextChoices):
 class ConnectionQuerySet(models.QuerySet):
     def between(self, user, other):
         first, second = ordered_pair(user, other)
-        return self.filter(first_user=first, second_user=second)
+        return self.filter(first_user_id=first, second_user_id=second)
 
     def involving(self, user):
         return self.filter(models.Q(first_user=user) | models.Q(second_user=user))

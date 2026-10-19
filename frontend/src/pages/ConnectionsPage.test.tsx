@@ -279,6 +279,28 @@ describe("sending a request", () => {
     expect(screen.getByLabelText("Phone number")).toHaveValue("");
   });
 
+  it("stops saying the request was sent once another action runs", async () => {
+    const MIA = { id: 13, status: "pending", user: { phone_number: "5551230007" } };
+    liveBackend((state) => ({
+      "POST /api/connections/": () => {
+        state.sent = [TO_DEE, MIA];
+        return json(201, MIA)({});
+      },
+      "POST /api/connections/13/cancel/": () => {
+        state.sent = [TO_DEE];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    await send("5551230007");
+    expect(await screen.findByRole("status")).toHaveTextContent("Request sent to (555) 123-0007.");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel request to (555) 123-0007" }));
+
+    await waitFor(() => expect(items("Requests sent")).toEqual(["(555) 123-0004"]));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
   it("says when the request connected at once", async () => {
     const CY = {
       id: 11,

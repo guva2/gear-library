@@ -47,8 +47,9 @@ DEMO_CONNECTIONS = [
 
 class Command(BaseCommand):
     help = (
-        "Create the demo users, their inventories and their connections. Users, demo "
-        "inventories and connected pairs that already exist are left unchanged."
+        "Create the demo users, their inventories and their connections. Users and demo "
+        "inventories that already exist, and pairs that already have a connection or a "
+        "request, are left unchanged."
     )
 
     @transaction.atomic
@@ -104,7 +105,7 @@ class Command(BaseCommand):
                 continue
             first, second = ordered_pair(requester, other_user)
             Connection.objects.create(
-                first_user=first, second_user=second, requested_by=requester, status=status
+                first_user_id=first, second_user_id=second, requested_by=requester, status=status
             )
             created += 1
         existing = len(DEMO_CONNECTIONS) - created

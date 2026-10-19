@@ -41,8 +41,12 @@ def assert_rejected_by(constraint, create):
 @pytest.mark.django_db
 class TestConnection:
     def test_ordered_pair_puts_the_lower_id_first(self, ada, bob):
-        assert ordered_pair(bob, ada) == (ada, bob)
-        assert ordered_pair(ada, bob) == (ada, bob)
+        assert ordered_pair(bob, ada) == (ada.pk, bob.pk)
+        assert ordered_pair(ada, bob) == (ada.pk, bob.pk)
+
+    def test_ordered_pair_takes_user_ids(self, ada, bob):
+        assert ordered_pair(bob.pk, ada) == (ada.pk, bob.pk)
+        assert ordered_pair(ada.pk, bob.pk) == (ada.pk, bob.pk)
 
     def test_the_lower_user_id_must_come_first(self, ada, bob):
         assert_rejected_by(
@@ -89,6 +93,12 @@ class TestConnection:
 
         assert list(Connection.objects.between(bob, ada)) == [connection]
         assert list(Connection.objects.between(ada, bob)) == [connection]
+
+    def test_between_takes_user_ids(self, ada, bob):
+        connection = connect(ada, bob)
+
+        assert list(Connection.objects.between(bob.pk, ada.pk)) == [connection]
+        assert list(Connection.objects.between(ada, bob.pk)) == [connection]
 
     def test_other_user_is_the_one_who_is_not_the_caller(self, ada, bob):
         connection = connect(ada, bob)

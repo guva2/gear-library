@@ -27,7 +27,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection, transaction
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
-from .errors import Conflict, violates
+from .errors import NO_SUCH_USER, Conflict, violates
 from .models import ONE_MEMBERSHIP_PER_USER, Inventory, Membership, MembershipStatus, Role
 
 User = get_user_model()
@@ -42,7 +42,6 @@ ROLE_REQUIRED = {
     Role.OWNER: "Only owners can do this.",
 }
 LAST_OWNER = "An inventory must keep at least one owner."
-NO_SUCH_USER = "No user has this phone number."
 NOT_PENDING = "This is not a pending invite."
 ALREADY_IN = "This user is already a member or has a pending invite."
 

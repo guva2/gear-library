@@ -34,7 +34,7 @@ def add(requested_by, other, status="pending"):
     """A connection added straight to the database."""
     first, second = ordered_pair(requested_by, other)
     return Connection.objects.create(
-        first_user=first, second_user=second, requested_by=requested_by, status=status
+        first_user_id=first, second_user_id=second, requested_by=requested_by, status=status
     )
 
 

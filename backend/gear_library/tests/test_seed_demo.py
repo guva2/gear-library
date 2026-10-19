@@ -167,7 +167,7 @@ def test_leaves_a_real_users_connection_to_a_demo_user_alone():
     )
     first, second = ordered_pair(avery, stranger)
     real = Connection.objects.create(
-        first_user=first, second_user=second, requested_by=stranger, status="pending"
+        first_user_id=first, second_user_id=second, requested_by=stranger, status="pending"
     )
 
     seed()

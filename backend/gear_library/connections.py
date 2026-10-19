@@ -17,8 +17,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
-from .errors import Conflict, violates
-from .inventories import NO_SUCH_USER
+from .errors import NO_SUCH_USER, Conflict, violates
 from .models import ONE_CONNECTION_PER_PAIR, Connection, ConnectionStatus, ordered_pair
 
 User = get_user_model()
@@ -47,8 +46,8 @@ def request_connection(user, phone_number):
     try:
         with transaction.atomic():
             return Connection.objects.create(
-                first_user=first,
-                second_user=second,
+                first_user_id=first,
+                second_user_id=second,
                 requested_by=user,
                 status=ConnectionStatus.PENDING,
             )

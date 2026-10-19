@@ -69,7 +69,7 @@ class RoleSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=Role.choices)
 
 
-class InviteeNumberSerializer(serializers.Serializer):
+class PersonNumberSerializer(serializers.Serializer):
     phone_number = serializers.CharField(read_only=True)
 
 
@@ -80,7 +80,7 @@ class InventoryInviteSerializer(serializers.ModelSerializer):
     send an invite look up who holds a number.
     """
 
-    invitee = InviteeNumberSerializer(source="user", read_only=True)
+    invitee = PersonNumberSerializer(source="user", read_only=True)
     invited_by = PersonNameSerializer(read_only=True)
 
     class Meta:
@@ -131,15 +131,8 @@ class ReceivedRequestSerializer(_ConnectionSerializer):
     person_serializer = PersonNameSerializer
 
 
-class PhoneOnlySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ["phone_number"]
-        read_only_fields = fields
-
-
 class SentRequestSerializer(_ConnectionSerializer):
     """A pending request the caller sent. The other user appears by phone number only,
     so sending and cancelling a request does not reveal whose number it is."""
 
-    person_serializer = PhoneOnlySerializer
+    person_serializer = PersonNumberSerializer
