@@ -2,7 +2,10 @@
 
 Setting a role and removing a member, which includes leaving, lock the inventory row and
 then re-read the caller's membership and the owners, so an inventory always keeps an
-owner. Renaming, deleting and invite changes take no lock.
+owner. Accepting takes `FOR KEY SHARE` on the inventory row. Deleting is one `DELETE` of
+the inventory row, and the database deletes its memberships and invites in that statement.
+Every one of these locks the inventory row before any membership or invite row. Renaming
+and the other invite changes take no lock.
 
 Accept, decline and revoke are each one conditional update that matches only a pending
 invite; an invite that is no longer pending gets `Conflict` (409), and one deleted with
@@ -10,9 +13,9 @@ its inventory gets `NotFound`. Accepting is idempotent: an invitee who is alread
 member keeps their membership, and accepting an accepted invite again returns it. The
 unique index on pending invites refuses a second invite with `Conflict`.
 
-Membership and invite foreign keys are checked when the transaction commits. An invite or
-accept whose inventory was deleted first gets `NotFound`, and a delete that commits after
-a new membership or invite gets `Conflict`.
+Membership and invite foreign keys are checked when the transaction commits. An invite
+whose inventory was deleted first gets `NotFound` at commit. An accept whose inventory is
+gone gets `NotFound` when it takes its lock.
 """
 
 import functools
@@ -45,7 +48,6 @@ ROLE_REQUIRED = {
 LAST_OWNER = "An inventory must keep at least one owner."
 NO_SUCH_USER = "No user has this phone number."
 NOT_PENDING = "This invite is no longer pending."
-CHANGED_DURING_DELETE = "The inventory changed while it was being deleted. Try again."
 
 
 class Conflict(APIException):
@@ -154,13 +156,7 @@ def rename_inventory(actor, name):
 
 def delete_inventory(actor):
     """`actor` must be an owner."""
-    try:
-        with transaction.atomic():
-            Inventory.objects.filter(pk=actor.inventory_id).delete()
-    except IntegrityError as error:
-        if _violates_inventory_reference(error):
-            raise Conflict(CHANGED_DURING_DELETE)
-        raise
+    Inventory.objects.filter(pk=actor.inventory_id).delete()
 
 
 @transaction.atomic
@@ -255,24 +251,33 @@ def _membership_if_accepted(invite, user):
     return Membership.objects.filter(inventory_id=invite.inventory_id, user=user).first()
 
 
+def _key_share_inventory(inventory_id):
+    """Takes `FOR KEY SHARE` on the inventory row, the lock a new membership's foreign key
+    check takes at commit. False when the inventory is gone."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"SELECT 1 FROM {connection.ops.quote_name(Inventory._meta.db_table)}"
+            " WHERE id = %s FOR KEY SHARE",
+            [inventory_id],
+        )
+        return cursor.fetchone() is not None
+
+
 def accept_invite(user, invite_id):
     """Returns the invitee's membership. Accepting again, or as an existing member,
     succeeds without adding a second membership."""
     invite = _invite_for(user, invite_id, by_invitee=True)
-    try:
-        with transaction.atomic():
-            try:
-                _finish(invite, InviteStatus.ACCEPTED)
-            except Conflict:
-                membership = _membership_if_accepted(invite, user)
-                if membership is None:
-                    raise
-                return membership
-            return _join(invite, user)
-    except IntegrityError as error:
-        if _violates_inventory_reference(error):
+    with transaction.atomic():
+        if not _key_share_inventory(invite.inventory_id):
             raise NotFound(INVITE_NOT_FOUND)
-        raise
+        try:
+            _finish(invite, InviteStatus.ACCEPTED)
+        except Conflict:
+            membership = _membership_if_accepted(invite, user)
+            if membership is None:
+                raise
+            return membership
+        return _join(invite, user)
 
 
 def decline_invite(user, invite_id):

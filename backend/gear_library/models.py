@@ -82,8 +82,9 @@ class Role(models.TextChoices):
 
 
 class Membership(models.Model):
+    # ON DELETE CASCADE in the database, from migration 0004.
     inventory = models.ForeignKey(
-        Inventory, on_delete=models.CASCADE, related_name="memberships"
+        Inventory, on_delete=models.DO_NOTHING, related_name="memberships"
     )
     user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="memberships")
     role = models.CharField(max_length=6, choices=Role.choices)
@@ -109,7 +110,10 @@ class InviteStatus(models.TextChoices):
 
 
 class InventoryInvite(models.Model):
-    inventory = models.ForeignKey(Inventory, on_delete=models.CASCADE, related_name="invites")
+    # ON DELETE CASCADE in the database, from migration 0004.
+    inventory = models.ForeignKey(
+        Inventory, on_delete=models.DO_NOTHING, related_name="invites"
+    )
     invitee = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="invites_received"
     )

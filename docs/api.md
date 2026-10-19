@@ -121,7 +121,7 @@ No body. `204` with no body. The session ends.
 | `POST` | `/api/inventories/` | Logged in. The caller becomes its owner. | `400` |
 | `GET` | `/api/inventories/{id}/` | Member. | `404` |
 | `PATCH` | `/api/inventories/{id}/` | Owner. Renames it. | `400`, `403`, `404` |
-| `DELETE` | `/api/inventories/{id}/` | Owner. Deletes it with its memberships and invites. | `403`, `404`, `409`: someone joined or was invited during the delete; retry. |
+| `DELETE` | `/api/inventories/{id}/` | Owner. Deletes it with its memberships and invites. | `403`, `404` |
 
 Every endpoint under `/api/inventories/{id}/` checks the caller's membership and role
 before it reads the body: a non-member gets `404` and a member without the role gets

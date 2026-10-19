@@ -1,6 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import ProtectedError
 
 from gear_library.models import Inventory, InventoryInvite, Membership
@@ -98,3 +98,29 @@ def test_deleting_an_inventory_deletes_its_memberships_and_invites(inventory, ad
     assert not Membership.objects.exists()
     assert not InventoryInvite.objects.exists()
     assert User.objects.count() == 2
+
+
+@pytest.mark.django_db
+def test_a_raw_sql_delete_of_an_inventory_deletes_its_memberships_and_invites(
+    inventory, ada, bob
+):
+    Membership.objects.create(inventory=inventory, user=ada, role="owner")
+    InventoryInvite.objects.create(inventory=inventory, invitee=bob, invited_by=ada)
+
+    with connection.cursor() as cursor:
+        cursor.execute("DELETE FROM gear_library_inventory WHERE id = %s", [inventory.pk])
+
+    assert not Membership.objects.exists()
+    assert not InventoryInvite.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("model", [Membership, InventoryInvite])
+def test_the_inventory_foreign_key_cascades_and_is_checked_at_commit(model):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT confdeltype, condeferrable, condeferred FROM pg_constraint"
+            " WHERE contype = 'f' AND conrelid = %s::regclass AND confrelid = %s::regclass",
+            [model._meta.db_table, Inventory._meta.db_table],
+        )
+        assert cursor.fetchall() == [("c", True, True)]

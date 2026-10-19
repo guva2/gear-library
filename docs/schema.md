@@ -16,7 +16,9 @@ The relational design for the whole app.
   it to the listed values, in addition to Django `choices`.
 - Foreign keys are `NO ACTION DEFERRABLE INITIALLY DEFERRED` in the database. The
   `on_delete` behaviour shown for each foreign key runs only through Django ORM deletes,
-  not raw SQL.
+  not raw SQL. The exceptions are `Membership.inventory_id` and
+  `InventoryInvite.inventory_id`: they are `ON DELETE CASCADE DEFERRABLE INITIALLY
+  DEFERRED` in the database, and `on_delete=models.DO_NOTHING` in Django.
 - Each format rule (phone number) is enforced twice: by a field validator, and by a
   database check constraint that holds when validation is bypassed.
 
@@ -57,7 +59,7 @@ inventories.
 
 | Column | Type | Rules |
 |---|---|---|
-| `inventory_id` | → `Inventory` | `on_delete=models.CASCADE`. |
+| `inventory_id` | → `Inventory` | `ON DELETE CASCADE` in the database. |
 | `user_id` | → `User` | `on_delete=models.PROTECT`. |
 | `role` | `varchar(6)` | `member`, `admin` or `owner`. |
 | `created_at` | `timestamptz` | |
@@ -79,7 +81,7 @@ Built in M4.
 
 | Column | Type | Rules |
 |---|---|---|
-| `inventory_id` | → `Inventory` | `on_delete=models.CASCADE`. |
+| `inventory_id` | → `Inventory` | `ON DELETE CASCADE` in the database. |
 | `invitee_id` | → `User` | `on_delete=models.PROTECT`. |
 | `invited_by_id` | → `User` | `on_delete=models.PROTECT`. |
 | `status` | `varchar(8)` | `pending`, `accepted`, `declined` or `revoked`. |
@@ -137,7 +139,13 @@ These rules span tables, so the database cannot check them alone.
   (`select_for_update`), then re-read the acting user's membership and role, the target
   membership and the owners. Two of these changes to one inventory run one at a time, so
   the inventory always keeps an owner.
-- Renaming and deleting an inventory and the invite changes take no lock.
+- Accepting an invite takes `FOR KEY SHARE` on the inventory's row before it changes the
+  invite.
+- Deleting an inventory is one `DELETE` of its row. The database deletes its memberships
+  and invites in the same statement, after the inventory row. Every operation that locks
+  the inventory row does so before it touches a membership or invite row, so a delete and
+  a role change, removal, leave or accept on the same inventory run one at a time.
+- Renaming an inventory, inviting, declining and revoking take no lock.
 - Accept, decline and revoke are each one conditional update on the invite: set the new
   status only if `status = 'pending'`. If no row matches and the invite still exists, it
   changed in the meantime and the action gets `409`. If the invite was deleted with its
@@ -150,9 +158,9 @@ These rules span tables, so the database cannot check them alone.
   committing can reach a user who is now a member. Accepting it succeeds and adds no
   membership.
 - The foreign keys from memberships and invites to the inventory are checked at commit.
-  An invite or accept whose inventory was deleted first gets `404`. A delete that commits
-  after a new membership or invite of the inventory gets `409`, deletes nothing, and can
-  be retried.
+  An invite whose inventory was deleted first gets `404`. An accept whose inventory was
+  deleted first gets `404` when it takes its lock. A delete that starts after an invite or
+  accept commits deletes the new invite or membership with the inventory.
 - These operations first lock the inventory's row (`select_for_update`): every change to
   its listings, and every borrow request, approve, decline, cancel or mark returned
   through it. An operation that touches several inventories, such as deleting an item
@@ -220,6 +228,8 @@ These rules span tables, so the database cannot check them alone.
 
 ### Deleting
 
-- Deleting an inventory deletes its memberships, invites and listings. The items stay with
-  their owners. Pending requests through it are cancelled first, in the same transaction;
-  items on loan through it keep their borrower, and their `loan_inventory_id` becomes null.
+- Deleting an inventory deletes its memberships, invites and listings. The database
+  deletes the memberships and invites through their `ON DELETE CASCADE` foreign keys. The
+  items stay with their owners. Pending requests through it are cancelled first, in the
+  same transaction; items on loan through it keep their borrower, and their
+  `loan_inventory_id` becomes null.
