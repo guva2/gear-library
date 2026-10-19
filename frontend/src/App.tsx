@@ -1,45 +1,52 @@
-import { useEffect, useState } from "react";
+import { BrowserRouter, Link, Outlet, Route, Routes } from "react-router";
+import { AuthProvider, RequireAuth } from "./auth";
+import HomePage from "./pages/HomePage";
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
 
-type Health = "loading" | "ok" | "database-unavailable" | "unreachable";
-
-const MESSAGES: Record<Health, string> = {
-  loading: "Checking the backend…",
-  ok: "Backend and database are ok.",
-  "database-unavailable": "The backend is up, but the database is unavailable.",
-  unreachable: "Could not reach the backend.",
-};
-
-async function checkHealth(signal: AbortSignal): Promise<Health> {
-  const response = await fetch("/api/health/", { signal });
-  const body = await response.json().catch(() => null);
-  if (response.status === 200 && body?.database === "ok") {
-    return "ok";
-  }
-  if (response.status === 503 && body?.database === "unavailable") {
-    return "database-unavailable";
-  }
-  return "unreachable";
-}
-
-export default function App() {
-  const [health, setHealth] = useState<Health>("loading");
-
-  useEffect(() => {
-    const controller = new AbortController();
-    checkHealth(controller.signal)
-      .catch(() => "unreachable" as const)
-      .then((result) => {
-        if (!controller.signal.aborted) {
-          setHealth(result);
-        }
-      });
-    return () => controller.abort();
-  }, []);
-
+function Layout() {
   return (
     <main>
       <h1>Gear Library</h1>
-      <p role="status">{MESSAGES[health]}</p>
+      <Outlet />
     </main>
+  );
+}
+
+function NotFound() {
+  return (
+    <p>
+      Page not found. <Link to="/">Go home</Link>
+    </p>
+  );
+}
+
+export function AppRoutes() {
+  return (
+    <AuthProvider>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <HomePage />
+              </RequireAuth>
+            }
+          />
+          <Route path="*" element={<NotFound />} />
+        </Route>
+      </Routes>
+    </AuthProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppRoutes />
+    </BrowserRouter>
   );
 }

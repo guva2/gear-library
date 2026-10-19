@@ -1,91 +1,235 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import App from "./App";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
+import { describe, expect, it } from "vitest";
+import { AppRoutes } from "./App";
+import { ADA, empty, fakeBackend, json } from "./test-backend";
 
-// React 18+ does not warn about a state update after unmount, so record the setters.
-const stateSetters = vi.hoisted(() => [] as ReturnType<typeof vi.fn>[]);
+const ANONYMOUS = json(403, { detail: "Authentication credentials were not provided." });
 
-vi.mock("react", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("react")>();
-  return {
-    ...actual,
-    useState: (initial: unknown) => {
-      const [value, set] = actual.useState(initial);
-      // One wrapper per hook instance, so the setter keeps React's stable identity.
-      const setter = actual.useRef<ReturnType<typeof vi.fn> | null>(null);
-      if (setter.current === null) {
-        setter.current = vi.fn(set);
-        stateSetters.push(setter.current);
-      }
-      return [value, setter.current];
-    },
-  };
-});
-
-function respondWith(status: number, body: string) {
-  const fetchMock = vi.fn().mockResolvedValue(new Response(body, { status }));
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+function renderAt(path: string) {
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <AppRoutes />
+    </MemoryRouter>,
+  );
 }
 
-describe("health page", () => {
-  it("shows ok once the backend and database answer", async () => {
-    const fetchMock = respondWith(200, JSON.stringify({ status: "ok", database: "ok" }));
+function fillIn(label: string, value: string) {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
 
-    render(<App />);
+describe("home page", () => {
+  it("shows who is signed in, their phone number and the health line", async () => {
+    fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
 
-    expect(screen.getByRole("status")).toHaveTextContent("Checking");
+    renderAt("/");
+
+    expect(await screen.findByText("Signed in as Ada Lovelace")).toBeInTheDocument();
+    expect(screen.getByText("(555) 123-4567")).toBeInTheDocument();
     expect(await screen.findByText("Backend and database are ok.")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/health/", expect.anything());
   });
 
-  it("shows the database as unavailable on a 503 from the backend", async () => {
-    respondWith(503, JSON.stringify({ status: "error", database: "unavailable" }));
+  it("sends an anonymous user to the login page", async () => {
+    fakeBackend({ "GET /api/auth/me/": ANONYMOUS });
 
-    render(<App />);
+    renderAt("/");
+
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
+  });
+
+  it("logs out and goes to the login page", async () => {
+    const backend = fakeBackend({
+      "GET /api/auth/me/": json(200, ADA),
+      "POST /api/auth/logout/": empty(204),
+    });
+    renderAt("/");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
+
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
+    expect(backend.requests("POST /api/auth/logout/")).toHaveLength(1);
+  });
+
+  it("stays signed in when logging out fails", async () => {
+    fakeBackend({
+      "GET /api/auth/me/": json(200, ADA),
+      "POST /api/auth/logout/": json(403, { detail: "CSRF Failed: CSRF token missing." }),
+    });
+    renderAt("/");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("CSRF Failed");
+    expect(screen.getByText("Signed in as Ada Lovelace")).toBeInTheDocument();
+  });
+});
+
+describe("logout from a stale tab", () => {
+  it("goes to the login page when the session is already gone", async () => {
+    fakeBackend({
+      "GET /api/auth/me/": json(200, ADA),
+      "POST /api/auth/logout/": ANONYMOUS,
+    });
+    renderAt("/");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
+
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
+    expect(screen.queryByText("Signed in as Ada Lovelace")).not.toBeInTheDocument();
+  });
+});
+
+describe("login page", () => {
+  it("logs in and shows the home page", async () => {
+    fakeBackend({ "GET /api/auth/me/": ANONYMOUS, "POST /api/auth/login/": json(200, ADA) });
+    renderAt("/");
+
+    await screen.findByRole("heading", { name: "Log in" });
+    fillIn("Phone number", "5551234567");
+    fillIn("Password", "correct-horse-battery");
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    expect(await screen.findByText("Signed in as Ada Lovelace")).toBeInTheDocument();
+  });
+
+  it("shows the wrong-credentials message for the whole form", async () => {
+    fakeBackend({
+      "POST /api/auth/login/": json(400, {
+        non_field_errors: ["Wrong phone number or password."],
+      }),
+    });
+    renderAt("/login");
+
+    fillIn("Phone number", "5551234567");
+    fillIn("Password", "wrong");
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Wrong phone number or password.",
+    );
+    expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
+  });
+
+  it("shows a repeated form error in a new alert element", async () => {
+    fakeBackend({
+      "POST /api/auth/login/": json(400, {
+        non_field_errors: ["Wrong phone number or password."],
+      }),
+    });
+    renderAt("/login");
+
+    fillIn("Phone number", "5551234567");
+    fillIn("Password", "wrong");
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+    const first = await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).not.toBe(first));
+    expect(screen.getByRole("alert")).toHaveTextContent("Wrong phone number or password.");
+  });
+
+  it("shows a phone number error next to the phone number field", async () => {
+    fakeBackend({
+      "POST /api/auth/login/": json(400, { phone_number: ["Enter a US phone number."] }),
+    });
+    renderAt("/login");
+
+    fillIn("Phone number", "555");
+    fillIn("Password", "pw");
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    const phone = screen.getByLabelText("Phone number");
+    expect(await screen.findByText("Enter a US phone number.")).toBeInTheDocument();
+    expect(phone).toHaveAccessibleDescription("Enter a US phone number.");
+    expect(phone).toBeInvalid();
+    expect(screen.getByLabelText("Password")).toBeValid();
+  });
+
+  it("links to the register page", async () => {
+    fakeBackend({});
+    renderAt("/login");
+
+    fireEvent.click(screen.getByRole("link", { name: "Create an account" }));
+
+    expect(screen.getByRole("heading", { name: "Create an account" })).toBeInTheDocument();
+  });
+});
+
+describe("register page", () => {
+  it("creates the account and shows the home page", async () => {
+    const backend = fakeBackend({ "POST /api/auth/register/": json(201, ADA) });
+    renderAt("/register");
+
+    fillIn("Phone number", "(555) 123-4567");
+    fillIn("First name", "Ada");
+    fillIn("Last name", "Lovelace");
+    fillIn("Password", "correct-horse-battery");
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(await screen.findByText("Signed in as Ada Lovelace")).toBeInTheDocument();
+    expect(backend.requests("POST /api/auth/register/")).toEqual([
+      {
+        phone_number: "(555) 123-4567",
+        first_name: "Ada",
+        last_name: "Lovelace",
+        password: "correct-horse-battery",
+      },
+    ]);
+  });
+
+  it("shows each field's errors next to that field", async () => {
+    fakeBackend({
+      "POST /api/auth/register/": json(400, {
+        phone_number: ["A user with this phone number already exists."],
+        password: ["This password is too short.", "This password is too common."],
+      }),
+    });
+    renderAt("/register");
+
+    fillIn("Phone number", "5551234567");
+    fillIn("First name", "Ada");
+    fillIn("Last name", "Lovelace");
+    fillIn("Password", "abc");
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(
-      await screen.findByText("The backend is up, but the database is unavailable."),
+      await screen.findByText("A user with this phone number already exists."),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("Phone number")).toHaveAccessibleDescription(
+      "A user with this phone number already exists.",
+    );
+    expect(screen.getByLabelText("Password")).toHaveAccessibleDescription(
+      "This password is too short. This password is too common.",
+    );
+    expect(screen.getByLabelText("First name")).toBeValid();
   });
 
-  it("shows an error when the request fails", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+  it("shows an error for a field the page has no input for", async () => {
+    fakeBackend({
+      "POST /api/auth/register/": json(400, { __all__: ["Something about the account."] }),
+    });
+    renderAt("/register");
 
-    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
-    expect(await screen.findByText("Could not reach the backend.")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something about the account.");
   });
 
-  // The Vite proxy answers with a non-JSON error when the backend is down.
-  it("shows an error for a response that is not a health report", async () => {
-    respondWith(502, "");
+  it("moves focus to the first invalid field after a failed submit", async () => {
+    fakeBackend({
+      "POST /api/auth/register/": json(400, {
+        first_name: ["This field may not be blank."],
+        password: ["This password is too short."],
+      }),
+    });
+    renderAt("/register");
 
-    render(<App />);
+    fillIn("Phone number", "5551234567");
+    fillIn("Password", "abc");
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
-    expect(await screen.findByText("Could not reach the backend.")).toBeInTheDocument();
-  });
-
-  // Vite's SPA fallback answers an unproxied path with 200 and HTML.
-  it("shows an error for a 200 that is not a health report", async () => {
-    respondWith(200, "<!doctype html><html></html>");
-
-    render(<App />);
-
-    expect(await screen.findByText("Could not reach the backend.")).toBeInTheDocument();
-  });
-
-  it("does not set state after unmounting before the response", async () => {
-    let resolve!: (response: Response) => void;
-    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise<Response>((r) => (resolve = r))));
-    stateSetters.length = 0;
-
-    const { unmount } = render(<App />);
-    unmount();
-    resolve(new Response(JSON.stringify({ status: "ok", database: "ok" }), { status: 200 }));
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(stateSetters.length).toBeGreaterThan(0);
-    for (const setter of stateSetters) expect(setter).not.toHaveBeenCalled();
+    await screen.findByText("This field may not be blank.");
+    expect(screen.getByLabelText("First name")).toHaveFocus();
   });
 });

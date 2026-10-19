@@ -23,7 +23,9 @@ def test_anonymous_request_is_refused():
 
 @pytest.mark.django_db
 def test_basic_auth_credentials_do_not_authenticate():
-    User.objects.create_user(phone_number="5551234567", password="s3cret-pass")
+    User.objects.create_user(
+        phone_number="5551234567", password="s3cret-pass", first_name="Ada", last_name="Lovelace"
+    )
     credentials = base64.b64encode(b"5551234567:s3cret-pass").decode()
     request = APIRequestFactory().get("/", HTTP_AUTHORIZATION=f"Basic {credentials}")
 

@@ -1,9 +1,9 @@
 # API
 
 A draft of the HTTP API. It lists paths, methods, who may call each endpoint and the main
-error codes. Request and response fields are not here; each milestone adds them when it
-builds its endpoints. The roles and rules behind "who may call" are in
-[`schema.md`](schema.md).
+error codes. Request and response fields are filled in for the milestones that have been
+built; each later milestone adds them when it builds its endpoints. The roles and rules
+behind "who may call" are in [`schema.md`](schema.md).
 
 ## Conventions
 
@@ -33,10 +33,85 @@ builds its endpoints. The roles and rules behind "who may call" are in
 | Method | Path | Who | Main errors |
 |---|---|---|---|
 | `GET` | `/api/auth/csrf/` | Anyone. Sets the `csrftoken` cookie. | |
-| `POST` | `/api/auth/register/` | Not logged in. Creates a user. | `400`: invalid or duplicate phone number, weak password. |
+| `POST` | `/api/auth/register/` | Not logged in. Creates a user. | `400`: invalid or duplicate phone number, weak password (a duplicate number and a weak password are reported together). `403`: logged in. |
 | `POST` | `/api/auth/login/` | Anyone. | `400`: wrong phone number or password. |
 | `POST` | `/api/auth/logout/` | Logged in. | `403` |
 | `GET` | `/api/auth/me/` | Logged in. The current user. | `403` when anonymous. |
+
+`register` and `login` check the CSRF token for anonymous callers too, so call
+`/api/auth/csrf/` first. A successful `register` or `login` replaces the `csrftoken`
+cookie: read it again before the next unsafe request.
+
+### Phone numbers
+
+Requests may format a phone number with spaces, dots, dashes and parentheses, and may
+start it with `1` or `+1`: `(555) 123-4567`, `+1 555-123-4567` and `5551234567` are the
+same number. Responses always carry 10 digits. Any other value is a `400` on
+`phone_number`.
+
+### User
+
+The body of `register`, `login` and `me` responses.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | |
+| `phone_number` | string | 10 digits. |
+| `first_name` | string | 1 to 32 characters. |
+| `last_name` | string | 1 to 32 characters. |
+
+### `GET /api/auth/csrf/`
+
+`204` with no body. The `csrftoken` cookie is in the response.
+
+### `POST /api/auth/register/`
+
+| Field | Type | |
+|---|---|---|
+| `phone_number` | string | Required. See [Phone numbers](#phone-numbers). |
+| `first_name` | string | Required. 1 to 32 characters after trimming spaces. |
+| `last_name` | string | Required. 1 to 32 characters after trimming spaces. |
+| `password` | string | Required. Must pass Django's password validators: at least 8 characters, not too common, not all digits, not too similar to the phone number or the names. |
+
+`201` with the new [User](#user). The caller is logged in.
+
+`400` errors are keyed by field, each a list of messages:
+
+```json
+{"phone_number": ["A user with this phone number already exists."]}
+```
+
+```json
+{"password": ["This password is too short. It must contain at least 8 characters."]}
+```
+
+`403` `{"detail": "You are already logged in."}` for a logged-in caller.
+
+### `POST /api/auth/login/`
+
+| Field | Type | |
+|---|---|---|
+| `phone_number` | string | Required. See [Phone numbers](#phone-numbers). |
+| `password` | string | Required. |
+
+`200` with the [User](#user). The caller is logged in.
+
+`400` for a wrong phone number, a wrong password or an inactive user, with one message:
+
+```json
+{"non_field_errors": ["Wrong phone number or password."]}
+```
+
+A missing field, or a `phone_number` that is not a phone number, is a `400` keyed by that
+field instead.
+
+### `POST /api/auth/logout/`
+
+No body. `204` with no body. The session ends.
+
+### `GET /api/auth/me/`
+
+`200` with the [User](#user).
 
 ## Inventories (M4)
 
