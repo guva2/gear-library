@@ -77,8 +77,8 @@ Built in M4.
 | Column | Type | Rules |
 |---|---|---|
 | `inventory_id` | → `Inventory` | `on_delete=models.CASCADE`. |
-| `invitee_id` | → `User` | `on_delete=models.CASCADE`. |
-| `invited_by_id` | → `User` | Nullable. `on_delete=models.SET_NULL`. |
+| `invitee_id` | → `User` | `on_delete=models.PROTECT`. |
+| `invited_by_id` | → `User` | `on_delete=models.PROTECT`. |
 | `status` | `varchar(8)` | `pending`, `accepted`, `declined` or `revoked`. |
 | `created_at` | `timestamptz` | |
 
@@ -96,14 +96,15 @@ It is one physical object, so its loan state is on this row, not per inventory.
 | `name` | `varchar(64)` | |
 | `description` | `varchar(512)` | Optional. |
 | `borrower_id` | → `User` | Nullable. `on_delete=models.PROTECT`. The requester while `requested`, the borrower while `on_loan`. |
-| `loan_listing_id` | → `InventoryItem` | Nullable. `on_delete=models.PROTECT`. The listing the borrow request was made through. Its inventory is the loan inventory. |
+| `loan_inventory_id` | → `Inventory` | Nullable. `on_delete=models.SET_NULL`. The inventory the borrow request was made through. |
 | `loan_status` | `varchar(9)` | `available`, `requested` or `on_loan`. |
 | `created_at` | `timestamptz` | |
 
-- Check: `borrower_id` and `loan_listing_id` are both null exactly when
-  `loan_status = 'available'`.
-- `loan_listing` must be a listing of this item. A check constraint cannot read another
-  row, so the borrowing service enforces this.
+- Check, one of:
+  - `available`, with `borrower_id` and `loan_inventory_id` both null.
+  - `requested`, with `borrower_id` and `loan_inventory_id` both set.
+  - `on_loan`, with `borrower_id` set. `loan_inventory_id` is null once that inventory is
+    deleted.
 - Check: `borrower_id <> owner_id`.
 - There is no loan history. The row holds only the current loan state.
 
@@ -125,16 +126,20 @@ These rules span tables, so the database cannot check them alone.
 
 ### Users
 
-- The app never deletes a user. A user is deactivated with `is_active`. The `PROTECT`
-  foreign keys make an ORM delete of a user with memberships or items fail.
+- The app never deletes a user. The `PROTECT` foreign keys make an ORM delete of a user
+  with memberships, invites or items fail.
 
 ### Concurrency
 
-- Every change to an inventory's memberships, invites, listings, or to the loan state of an
-  item through one of its listings, first locks that inventory's row
-  (`select_for_update`). The change then re-reads and re-checks the rows it depends on.
-  This makes the last-owner rule and the borrow rules hold when two requests run at the
-  same time.
+- Every change to an inventory's memberships, invites or listings, and every borrow
+  request through it, first locks that inventory's row (`select_for_update`). An operation
+  that touches several inventories, such as deleting an item listed in several, locks them
+  in ascending `id` order.
+- After locking, the operation re-reads and re-checks the rows it depends on, including the
+  acting user's own membership and role.
+- Approve, decline, cancel and mark returned are each one conditional update on the item.
+  It matches the `loan_status`, `borrower_id` and `loan_inventory_id` the acting user saw.
+  If no row matches, the request changed in the meantime and the action is rejected.
 
 ### Inventories and roles
 
@@ -144,8 +149,8 @@ These rules span tables, so the database cannot check them alone.
 - Only owners invite and revoke invites. Invites go only to users who are not members.
   Accepting checks this again. The invitee joins with the `member` role. A pending invite
   stays valid if its sender loses the owner role.
-- Only members of an inventory see it and the items listed in it. A borrower also sees
-  the item they hold, after they leave its loan inventory.
+- Only members of an inventory see it and the items listed in it. An item's owner always
+  sees it. A borrower also sees the item they hold.
 
 ### Listings
 
@@ -153,27 +158,28 @@ These rules span tables, so the database cannot check them alone.
 - An admin removes only their own items. An owner removes any item.
 - A listing is removed when its item's owner leaves, is removed, or takes the `member`
   role in that inventory.
+- Removing a listing does not change a loan. The borrower and loan status are on the item.
 
 ### Borrowing
 
-- A borrow request names the listing it is made through. The requester must be a member
-  of its inventory and must not own the item.
-- A borrow request is one conditional update: set the borrower and loan listing only if
+- A borrow request names the inventory it is made through. The requester must be a member
+  of it, the item must be listed in it, and the requester must not own the item.
+- A borrow request is one conditional update: set the borrower and loan inventory only if
   the item is `available`. One requester at a time, across all of the item's listings.
   Other requests are blocked until the request is declined or cancelled, or the item is
   returned.
-- Admins and owners of the loan inventory approve, decline, or mark an item returned. An
-  admin or owner cannot approve their own request. The borrower cancels while the request
-  is pending.
-- A pending request is cancelled when its listing is removed, when the requester leaves or
-  is removed from the loan inventory, or when the item is deleted. The cancel runs first,
-  in the same transaction, because `loan_listing` is `PROTECT`.
-- While an item is `on_loan`, its loan listing cannot be removed and the item cannot be
-  deleted. So until it is returned, its owner cannot leave the loan inventory, be removed
-  from it, or take the `member` role in it, and the inventory cannot be deleted. The
-  borrower can leave; admins of the loan inventory still mark the item returned.
+- Admins and owners of the loan inventory approve and decline requests. The borrower
+  cancels while the request is pending.
+- Admins and owners of the loan inventory mark an item returned. The item's owner can
+  always mark it returned, so a loan stays closable after its listing or loan inventory is
+  gone.
+- The borrower cannot approve their own request or mark their own loan returned.
+- A pending request is cancelled when the item leaves the loan inventory, when the
+  requester leaves or is removed from it, or when the item is deleted.
+- An item cannot be deleted while it is `on_loan`.
 
 ### Deleting
 
-- Deleting an inventory first cancels the pending requests made through its listings. It
-  then deletes its memberships, invites and listings. The items stay with their owners.
+- Deleting an inventory deletes its memberships, invites and listings. The items stay with
+  their owners. Pending requests through it are cancelled first, in the same transaction;
+  items on loan through it keep their borrower, and their `loan_inventory_id` becomes null.
