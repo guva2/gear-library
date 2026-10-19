@@ -17,6 +17,15 @@ const INVITE = {
   invited_by: { first_name: "Bob", last_name: "Stone" },
 };
 
+// Accepted connections of the caller: Bob is a member, Cal has the pending invite, and
+// Dee and Eve can be invited.
+const CONNECTIONS = [
+  BOB,
+  { id: 4, first_name: "Cal", last_name: "Reyes", phone_number: "5551230004" },
+  { id: 5, first_name: "Dee", last_name: "Park", phone_number: "5551230005" },
+  { id: 6, first_name: "Eve", last_name: "Moss", phone_number: "5551230006" },
+].map((user) => ({ id: 100 + user.id, status: "accepted", user }));
+
 function members(role: Role) {
   return [
     { ...ADA, role },
@@ -32,6 +41,7 @@ function asRole(role: Role, routes: Routes = {}) {
       : {
           [`GET ${URL}members/`]: json(200, members(role)),
           [`GET ${URL}invites/`]: json(200, [INVITE]),
+          "GET /api/connections/": json(200, CONNECTIONS),
         };
   return fakeBackend({
     "GET /api/auth/me/": json(200, ADA),
@@ -71,6 +81,7 @@ describe("as a member", () => {
     expect(document.body.textContent).not.toMatch(PHONE_NUMBER);
     expect(screen.queryByText("Mia Lee")).not.toBeInTheDocument();
     expect(backend.requests(`GET ${URL}invites/`)).toHaveLength(0);
+    expect(backend.requests("GET /api/connections/")).toHaveLength(0);
   });
 
   it("offers only Leave", async () => {
@@ -80,8 +91,7 @@ describe("as a member", () => {
 
     expect(screen.getByRole("button", { name: "Leave inventory" })).toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Phone number")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Remove|Rename|Delete|Revoke/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Invite|Remove|Rename|Delete|Revoke/ })).toBeNull();
   });
 });
 
@@ -107,42 +117,78 @@ describe("as an admin", () => {
 
     await open();
 
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /^Role for/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Remove|Rename|Delete/ })).toBeNull();
   });
 
-  it("invites by phone number and reloads the pending invites", async () => {
-    let invites: (typeof INVITE)[] = [];
+  it("offers only connections who are not members and have no pending invite", async () => {
+    asRole("admin");
+
+    await open();
+
+    const picker = screen.getByRole("combobox", { name: "Connection" });
+    expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Dee Park",
+      "Eve Moss",
+    ]);
+  });
+
+  it("invites the chosen connection and reloads the invites and the picker", async () => {
+    const EVE_INVITE = { ...INVITE, id: 41, invitee: { phone_number: "5551230006" } };
+    let invites = [INVITE];
     const backend = asRole("admin", {
       [`GET ${URL}invites/`]: () => json(200, invites)({}),
       [`POST ${URL}invites/`]: () => {
-        invites = [INVITE];
-        return json(201, INVITE)({});
+        invites = [INVITE, EVE_INVITE];
+        return json(201, EVE_INVITE)({});
       },
     });
     await open();
 
-    fillIn("Phone number", "(555) 123-0004");
+    fireEvent.change(screen.getByRole("combobox", { name: "Connection" }), {
+      target: { value: "6" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
-    expect(await within(region("Pending invites")).findByText(/123-0004/)).toBeInTheDocument();
-    expect(backend.requests(`POST ${URL}invites/`)).toEqual([{ phone_number: "(555) 123-0004" }]);
-    expect(screen.getByLabelText("Phone number")).toHaveValue("");
+    expect(await within(region("Pending invites")).findByText(/123-0006/)).toBeInTheDocument();
+    expect(backend.requests(`POST ${URL}invites/`)).toEqual([{ user_id: 6 }]);
+    const picker = screen.getByRole("combobox", { name: "Connection" });
+    expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Dee Park",
+    ]);
   });
 
-  it("shows an unknown number next to the phone number field", async () => {
+  it.each([
+    ["every connection is a member or invited", CONNECTIONS.slice(0, 2)],
+    ["there are no connections", []],
+  ])("links to My connections when %s", async (_, connections) => {
+    asRole("admin", { "GET /api/connections/": json(200, connections) });
+
+    await open();
+
+    const invites = region("Pending invites");
+    expect(within(invites).getByText(/No connections to invite\./)).toBeInTheDocument();
+    expect(within(invites).getByRole("link", { name: "My connections" })).toHaveAttribute(
+      "href",
+      "/connections",
+    );
+    expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Invite" })).toBeNull();
+  });
+
+  it("shows a refused connection next to the picker", async () => {
     asRole("admin", {
-      [`POST ${URL}invites/`]: json(400, { phone_number: ["No user has this phone number."] }),
+      [`POST ${URL}invites/`]: json(400, { user_id: ["You can invite only your connections."] }),
     });
     await open();
 
-    fillIn("Phone number", "5559999999");
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
-    const phone = screen.getByLabelText("Phone number");
+    const picker = screen.getByRole("combobox", { name: "Connection" });
     await waitFor(() =>
-      expect(phone).toHaveAccessibleDescription("No user has this phone number."),
+      expect(picker).toHaveAccessibleDescription("You can invite only your connections."),
     );
+    expect(picker).toHaveFocus();
   });
 
   it("shows a conflict for the whole invite form", async () => {
@@ -153,7 +199,6 @@ describe("as an admin", () => {
     });
     await open();
 
-    fillIn("Phone number", "5551230003");
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
     expect(await within(region("Pending invites")).findByRole("alert")).toHaveTextContent(
@@ -176,7 +221,6 @@ describe("as an admin", () => {
     });
     await open();
 
-    fillIn("Phone number", "5551230004");
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
     expect(await screen.findByText("Your role: member")).toBeInTheDocument();

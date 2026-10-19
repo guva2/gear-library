@@ -22,6 +22,7 @@ from .serializers import (
     InventoryInviteSerializer,
     InventoryNameSerializer,
     InventorySerializer,
+    InviteSerializer,
     LoginSerializer,
     MemberSerializer,
     MyInviteSerializer,
@@ -197,8 +198,8 @@ def member_detail(request, inventory_id, user_id):
 def inventory_invites(request, inventory_id):
     actor = inventories.get_membership(request.user, inventory_id, Role.ADMIN)
     if request.method == "POST":
-        phone_number = _validated(PhoneNumberSerializer, request)["phone_number"]
-        invite = inventories.invite(actor, phone_number)
+        user_id = _validated(InviteSerializer, request)["user_id"]
+        invite = inventories.invite(actor, user_id)
         return Response(InventoryInviteSerializer(invite).data, status=status.HTTP_201_CREATED)
     invites = (
         Membership.objects.pending()

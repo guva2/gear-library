@@ -23,14 +23,18 @@ inventory was deleted first gets `NotFound` at commit.
 
 import functools
 
-from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection, transaction
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
-from .errors import NO_SUCH_USER, Conflict, violates
-from .models import ONE_MEMBERSHIP_PER_USER, Inventory, Membership, MembershipStatus, Role
-
-User = get_user_model()
+from .errors import Conflict, violates
+from .models import (
+    ONE_MEMBERSHIP_PER_USER,
+    Connection,
+    Inventory,
+    Membership,
+    MembershipStatus,
+    Role,
+)
 
 _RANK = {Role.MEMBER: 0, Role.ADMIN: 1, Role.OWNER: 2}
 
@@ -44,6 +48,7 @@ ROLE_REQUIRED = {
 LAST_OWNER = "An inventory must keep at least one owner."
 NOT_PENDING = "This is not a pending invite."
 ALREADY_IN = "This user is already a member or has a pending invite."
+NOT_A_CONNECTION = "You can invite only your connections."
 
 
 def has_role(membership, role):
@@ -167,19 +172,17 @@ def remove_member(user, inventory_id, member_user_id):
     target.delete()
 
 
-def invite(actor, phone_number):
-    """Invites the user with `phone_number` by adding a pending membership. `actor` must be
-    an admin or owner, checked before this looks the number up, so a plain member or
-    outsider learns nothing. An admin or owner can still tell whether a number has an
-    account: an unknown one is a `ValidationError`."""
-    invitee = User.objects.filter(phone_number=phone_number).first()
-    if invitee is None:
-        raise ValidationError({"phone_number": [NO_SUCH_USER]})
+def invite(actor, user_id):
+    """Invites the user `user_id` by adding a pending membership. `actor` must be an admin
+    or owner, and the invitee one of the actor's accepted connections. Anyone else is a
+    `ValidationError` with one message, so the actor learns nothing about other users."""
+    if not Connection.objects.accepted().between(actor.user_id, user_id).exists():
+        raise ValidationError({"user_id": [NOT_A_CONNECTION]})
     try:
         with transaction.atomic():
             return Membership.objects.create(
                 inventory_id=actor.inventory_id,
-                user=invitee,
+                user_id=user_id,
                 role=Role.MEMBER,
                 status=MembershipStatus.PENDING,
                 invited_by_id=actor.user_id,

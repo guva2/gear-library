@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth } from "../auth";
+import type { Connection } from "../connections";
 import { Confirmation, Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
 import {
   fullName,
@@ -25,12 +26,14 @@ interface PageData {
   inventory: Inventory;
   people: People;
   invites: InventoryInvite[];
+  /** The caller's accepted connections. Loaded only for admins and owners. */
+  connections: Connection[];
 }
 
 async function loadPage(base: string, signal: AbortSignal): Promise<PageData> {
   const inventory = await getJson<Inventory>(base, signal);
   const staff = hasRole(inventory.role, "admin");
-  const [people, invites] = await Promise.all([
+  const [people, invites, connections] = await Promise.all([
     staff
       ? getJson<Member[]>(`${base}members/`, signal).then(
           (members): People => ({ staff: true, members }),
@@ -39,8 +42,9 @@ async function loadPage(base: string, signal: AbortSignal): Promise<PageData> {
           (names): People => ({ staff: false, names }),
         ),
     staff ? getJson<InventoryInvite[]>(`${base}invites/`, signal) : [],
+    staff ? getJson<Connection[]>("/api/connections/", signal) : [],
   ]);
-  return { inventory, people, invites };
+  return { inventory, people, invites, connections };
 }
 
 type Method = "POST" | "PATCH" | "DELETE";
@@ -114,7 +118,7 @@ function InventoryView({ base }: { base: string }) {
     return <p role="alert">Could not load the inventory.</p>;
   }
 
-  const { inventory, people, invites } = page.data;
+  const { inventory, people, invites, connections } = page.data;
   const isOwner = inventory.role === "owner";
   return (
     <>
@@ -145,6 +149,7 @@ function InventoryView({ base }: { base: string }) {
       {people.staff && (
         <Invites
           invites={invites}
+          invitable={invitable(connections, people.members, invites)}
           send={send}
           base={base}
           reload={reload}
@@ -253,15 +258,32 @@ function MemberTable({ members, ownerId, onSetRole, onRemove }: MemberTableProps
   );
 }
 
+/**
+ * The connections who are not members and have no pending invite. A pending invite shows
+ * the invitee by phone number only, so it is matched by phone number.
+ */
+function invitable(
+  connections: Connection[],
+  members: Member[],
+  invites: InventoryInvite[],
+): Connection["user"][] {
+  const memberIds = new Set(members.map((member) => member.id));
+  const invited = new Set(invites.map((invite) => invite.invitee.phone_number));
+  return connections
+    .map((connection) => connection.user)
+    .filter((user) => !memberIds.has(user.id) && !invited.has(user.phone_number));
+}
+
 interface InvitesProps {
   invites: InventoryInvite[];
+  invitable: Connection["user"][];
   send: Send;
   base: string;
   reload: () => void;
   onRevoke: (invite: InventoryInvite) => void;
 }
 
-function Invites({ invites, send, base, reload, onRevoke }: InvitesProps) {
+function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const formRef = useFocusFirstInvalid(errors);
 
@@ -269,14 +291,11 @@ function Invites({ invites, send, base, reload, onRevoke }: InvitesProps) {
     event.preventDefault();
     const form = event.currentTarget;
     const failed = await send(`${base}invites/`, "POST", {
-      body: { phone_number: new FormData(form).get("phone_number") },
-      fields: ["phone_number"],
+      body: { user_id: Number(new FormData(form).get("user_id")) },
+      fields: ["user_id"],
     });
     setErrors(failed ?? {});
-    if (!failed) {
-      form.reset();
-      reload();
-    }
+    if (!failed) reload();
   }
 
   return (
@@ -305,11 +324,33 @@ function Invites({ invites, send, base, reload, onRevoke }: InvitesProps) {
           ))}
         </ul>
       )}
-      <form ref={formRef} onSubmit={submit} noValidate>
-        <FormErrors errors={errors} />
-        <Field name="phone_number" label="Phone number" type="tel" errors={errors} />
-        <button type="submit">Invite</button>
-      </form>
+      <FormErrors errors={errors} />
+      {invitable.length === 0 ? (
+        <p>
+          No connections to invite. Find people in{" "}
+          <Link to="/connections">My connections</Link>.
+        </p>
+      ) : (
+        <form ref={formRef} onSubmit={submit} noValidate>
+          <p>
+            <label htmlFor="user_id">Connection</label>{" "}
+            <select
+              id="user_id"
+              name="user_id"
+              aria-invalid={errors.user_id ? true : undefined}
+              aria-describedby={errors.user_id ? "user_id-error" : undefined}
+            >
+              {invitable.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {fullName(user)}
+                </option>
+              ))}
+            </select>{" "}
+            <button type="submit">Invite</button>
+            {errors.user_id && <span id="user_id-error"> {errors.user_id.join(" ")}</span>}
+          </p>
+        </form>
+      )}
     </section>
   );
 }

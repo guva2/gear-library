@@ -8,7 +8,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 
 from gear_library import inventories
 from gear_library.errors import Conflict
-from gear_library.models import Inventory, Membership
+from gear_library.models import Connection, Inventory, Membership, ordered_pair
 
 User = get_user_model()
 
@@ -42,6 +42,16 @@ def invite_pending(inventory, n, invited_by):
         inventory=inventory, user=user, role="member", status="pending", invited_by=invited_by
     )
     return user
+
+
+def connect(user, other, status="accepted", requested_by=None):
+    first, second = ordered_pair(user, other)
+    return Connection.objects.create(
+        first_user_id=first,
+        second_user_id=second,
+        requested_by=requested_by or user,
+        status=status,
+    )
 
 
 def role_of(inventory, user):
@@ -252,11 +262,12 @@ class TestPendingMember:
 @pytest.mark.django_db
 class TestInvite:
     @pytest.mark.parametrize("role", ["admin", "owner"])
-    def test_admins_and_owners_invite_by_phone_number(self, inventory, role):
+    def test_admins_and_owners_invite_a_connection(self, inventory, role):
         actor = join(inventory, role, 2)
         invitee = make_user(3)
+        connect(actor, invitee)
 
-        invite = inventories.invite(as_(actor, inventory), invitee.phone_number)
+        invite = inventories.invite(as_(actor, inventory), invitee.id)
 
         assert (invite.user, invite.invited_by, invite.status, invite.role) == (
             invitee,
@@ -265,45 +276,94 @@ class TestInvite:
             "member",
         )
 
-    def test_an_unknown_phone_number_is_invalid(self, inventory, owner):
+    @pytest.mark.parametrize(
+        "who",
+        [
+            "no such user",
+            "not connected",
+            "requested by the caller",
+            "requested of the caller",
+            "connected to another admin",
+            "the caller",
+        ],
+    )
+    def test_anyone_but_a_connection_is_invalid_with_one_message(self, inventory, owner, who):
+        admin = join(inventory, "admin", 2)
+        other = make_user(3)
+        if who == "requested by the caller":
+            connect(owner, other, status="pending", requested_by=owner)
+        elif who == "requested of the caller":
+            connect(owner, other, status="pending", requested_by=other)
+        elif who == "connected to another admin":
+            connect(admin, other)
+        user_id = {"no such user": 999999, "the caller": owner.id}.get(who, other.id)
+
         with pytest.raises(ValidationError) as excinfo:
-            inventories.invite(as_(owner, inventory), "5559999999")
-        assert "phone_number" in excinfo.value.detail
+            inventories.invite(as_(owner, inventory), user_id)
+        assert excinfo.value.detail == {"user_id": [inventories.NOT_A_CONNECTION]}
+        assert not Membership.objects.pending().exists()
 
     @pytest.mark.parametrize("status", ["active", "pending"])
     def test_a_member_or_someone_already_invited_conflicts(self, inventory, owner, status):
         invitee = make_user(3)
+        connect(owner, invitee)
         Membership.objects.create(
             inventory=inventory, user=invitee, role="member", status=status, invited_by=owner
         )
 
         with pytest.raises(Conflict):
-            inventories.invite(as_(owner, inventory), invitee.phone_number)
+            inventories.invite(as_(owner, inventory), invitee.id)
         assert Membership.objects.filter(user=invitee).count() == 1
+
+    def test_a_member_who_is_not_a_connection_is_invalid_not_a_conflict(self, inventory, owner):
+        member = join(inventory, "member", 3)
+
+        with pytest.raises(ValidationError):
+            inventories.invite(as_(owner, inventory), member.id)
 
     @pytest.mark.parametrize("finish", ["decline", "revoke"])
     def test_can_invite_again_after_a_decline_or_revoke(self, inventory, owner, finish):
         invitee = make_user(3)
-        invite = inventories.invite(as_(owner, inventory), invitee.phone_number)
+        connect(owner, invitee)
+        invite = inventories.invite(as_(owner, inventory), invitee.id)
         if finish == "decline":
             inventories.decline_invite(invitee, invite.id)
         else:
             inventories.revoke_invite(owner, invite.id)
 
-        again = inventories.invite(as_(owner, inventory), invitee.phone_number)
+        again = inventories.invite(as_(owner, inventory), invitee.id)
 
         assert again.status == "pending"
+
+    def test_removing_the_connection_later_leaves_invites_and_members_alone(
+        self, inventory, owner
+    ):
+        """The connection is checked only when the invite is sent."""
+        invitee, member = make_user(3), make_user(4)
+        connect(owner, invitee)
+        connect(owner, member)
+        pending = inventories.invite(as_(owner, inventory), invitee.id)
+        joined = inventories.invite(as_(owner, inventory), member.id)
+        inventories.accept_invite(member, joined.id)
+
+        Connection.objects.all().delete()
+
+        assert (status_of(pending.pk), status_of(joined.pk)) == ("pending", "active")
+        inventories.accept_invite(invitee, pending.id)
+        assert role_of(inventory, invitee) == "member"
 
 
 @pytest.mark.django_db
 class TestAnswerInvite:
     @pytest.fixture
-    def invitee(self):
-        return make_user(3, "Ivy")
+    def invitee(self, owner):
+        invitee = make_user(3, "Ivy")
+        connect(owner, invitee)
+        return invitee
 
     @pytest.fixture
     def invite(self, inventory, owner, invitee):
-        return inventories.invite(as_(owner, inventory), invitee.phone_number)
+        return inventories.invite(as_(owner, inventory), invitee.id)
 
     def test_accepting_joins_as_member(self, inventory, invitee, invite):
         membership = inventories.accept_invite(invitee, invite.id)
@@ -475,7 +535,8 @@ class TestAnswerInvite:
 
     def test_an_invite_stays_valid_when_its_sender_leaves(self, inventory, invitee):
         admin = join(inventory, "admin", 4)
-        invite = inventories.invite(as_(admin, inventory), invitee.phone_number)
+        connect(admin, invitee)
+        invite = inventories.invite(as_(admin, inventory), invitee.id)
         inventories.remove_member(admin, inventory.id, admin.id)
 
         inventories.accept_invite(invitee, invite.id)
@@ -664,8 +725,10 @@ class TestCommittedRaces:
         return inventories.create_inventory(owner, "Climbing").inventory
 
     @pytest.fixture
-    def invitee(self):
-        return make_user(3, "Ivy")
+    def invitee(self, owner):
+        invitee = make_user(3, "Ivy")
+        connect(owner, invitee)
+        return invitee
 
     def race(self, first, second, held, release):
         """Runs `first` until it sets `held`, then `second` until it waits on a lock, then
@@ -689,7 +752,7 @@ class TestCommittedRaces:
         Inventory.objects.filter(pk=inventory.pk).delete()
 
         with pytest.raises(NotFound) as excinfo:
-            inventories.invite(actor, invitee.phone_number)
+            inventories.invite(actor, invitee.id)
         assert excinfo.value.detail == "Inventory not found."
         assert not Membership.objects.exists()
 
@@ -700,7 +763,7 @@ class TestCommittedRaces:
 
         def invite_before_the_delete(execute, sql, params, many, context):
             if sql.startswith(SELECT_INVENTORY) and "FOR UPDATE" in sql:
-                action = lambda: inventories.invite(as_(owner, inventory), invitee.phone_number)
+                action = lambda: inventories.invite(as_(owner, inventory), invitee.id)
                 run_in_thread("invite", action, outcomes).join(10)
             return execute(sql, params, many, context)
 
@@ -724,7 +787,7 @@ class TestCommittedRaces:
                 assert release.wait(10)
 
         outcomes = self.race(
-            delete, lambda: inventories.invite(inviter, invitee.phone_number), held, release
+            delete, lambda: inventories.invite(inviter, invitee.id), held, release
         )
 
         assert outcomes["first"] == "ok"
@@ -738,9 +801,9 @@ class TestCommittedRaces:
 
         def first():
             with connection.execute_wrapper(hold_after(INSERT_MEMBERSHIP, held, release)):
-                inventories.invite(as_(owner, inventory), invitee.phone_number)
+                inventories.invite(as_(owner, inventory), invitee.id)
 
-        second = lambda: inventories.invite(as_(owner, inventory), invitee.phone_number)
+        second = lambda: inventories.invite(as_(owner, inventory), invitee.id)
 
         outcomes = self.race(first, second, held, release)
 
@@ -751,7 +814,7 @@ class TestCommittedRaces:
     def test_a_delete_waits_for_an_accept_and_then_deletes_the_new_membership(
         self, inventory, owner, invitee
     ):
-        invite = inventories.invite(as_(owner, inventory), invitee.phone_number)
+        invite = inventories.invite(as_(owner, inventory), invitee.id)
         actor = as_(owner, inventory, "owner")
         held, release = threading.Event(), threading.Event()
 
@@ -766,7 +829,7 @@ class TestCommittedRaces:
         assert not Membership.objects.exists()
 
     def test_an_accept_waits_for_a_delete_and_is_not_found(self, inventory, owner, invitee):
-        invite = inventories.invite(as_(owner, inventory), invitee.phone_number)
+        invite = inventories.invite(as_(owner, inventory), invitee.id)
         actor = as_(owner, inventory, "owner")
         held, release = threading.Event(), threading.Event()
 
@@ -786,7 +849,7 @@ class TestCommittedRaces:
         assert not Membership.objects.exists()
 
     def test_a_revoke_waits_for_an_accept_and_conflicts(self, inventory, owner, invitee):
-        invite = inventories.invite(as_(owner, inventory), invitee.phone_number)
+        invite = inventories.invite(as_(owner, inventory), invitee.id)
         held, release = threading.Event(), threading.Event()
 
         def accept():

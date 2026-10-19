@@ -76,8 +76,8 @@ class PersonNumberSerializer(serializers.Serializer):
 class InventoryInviteSerializer(serializers.ModelSerializer):
     """A pending membership as the inventory's admins and owners see it.
 
-    The invitee appears by phone number only: a name or user id would let anyone who can
-    send an invite look up who holds a number.
+    The invitee appears by phone number only: every admin and owner of the inventory sees
+    the invite, not only the one connected to the invitee.
     """
 
     invitee = PersonNumberSerializer(source="user", read_only=True)
@@ -87,6 +87,10 @@ class InventoryInviteSerializer(serializers.ModelSerializer):
         model = Membership
         fields = ["id", "invitee", "invited_by"]
         read_only_fields = fields
+
+
+class InviteSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField()
 
 
 class PhoneNumberSerializer(serializers.Serializer):

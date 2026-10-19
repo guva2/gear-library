@@ -38,10 +38,11 @@ DEMO_INVENTORIES = [
 ]
 
 # (requested by, other user, status). A later run skips a pair that already has a row.
+# Each invite above goes to a connection of its sender.
 DEMO_CONNECTIONS = [
-    (AVERY, JORDAN, ConnectionStatus.ACCEPTED),
+    (SAM, AVERY, ConnectionStatus.ACCEPTED),
     (JORDAN, SAM, ConnectionStatus.ACCEPTED),
-    (SAM, AVERY, ConnectionStatus.PENDING),
+    (AVERY, JORDAN, ConnectionStatus.PENDING),
 ]
 
 

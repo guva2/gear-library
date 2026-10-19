@@ -189,7 +189,7 @@ a lower role.
 | Method | Path | Who | Main errors |
 |---|---|---|---|
 | `GET` | `/api/inventories/{id}/invites/` | Admin. The inventory's pending invites. | `403`, `404` |
-| `POST` | `/api/inventories/{id}/invites/` | Admin. Invites a user by phone number. | `400`: invalid number, or no such user. `403`, `404`. `409`: already a member, or an invite is pending. |
+| `POST` | `/api/inventories/{id}/invites/` | Admin. Invites one of the caller's accepted connections. | `400`: not one of the caller's connections. `403`, `404`. `409`: already a member, or an invite is pending. |
 | `POST` | `/api/invites/{id}/revoke/` | Admin of the invite's inventory. Any pending invite. | `403`. `404`: no such invite. `409`: not a pending invite. |
 | `GET` | `/api/invites/` | Logged in. The caller's pending invites. | |
 | `POST` | `/api/invites/{id}/accept/` | The invitee. Joins as `member`. | `403`. `404`: no such invite. |
@@ -223,18 +223,27 @@ first.
 
 | Field | Type | |
 |---|---|---|
-| `phone_number` | string | Required. See [Phone numbers](#phone-numbers). |
+| `user_id` | integer | Required. The `id` of one of the caller's accepted connections, as in [Connection](#connection). |
+
+The access check comes before the body: a non-member gets `404` and a `member` gets `403`
+whatever they send.
 
 `201` with the new [Inventory invite](#inventory-invite). `400` errors are keyed by
-`phone_number`:
+`user_id`. Any id that is not one of the caller's accepted connections gets one message,
+whether no such user exists, the two are not connected, only a request is pending, or the
+id is the caller's own:
 
 ```json
-{"phone_number": ["No user has this phone number."]}
+{"user_id": ["You can invite only your connections."]}
 ```
 
-`409` `{"detail": "This user is already a member or has a pending invite."}` when the user
-is a member or already invited. After a decline or revoke the same number can be invited
-again.
+A missing or non-integer `user_id` gets the usual field error, such as
+`{"user_id": ["This field is required."]}`.
+
+`409` `{"detail": "This user is already a member or has a pending invite."}` when the
+connection is a member or already invited. After a decline or revoke the same user can be
+invited again. The connection is checked only when the invite is sent: removing it later
+leaves the invite and the membership as they are.
 
 #### My invite
 

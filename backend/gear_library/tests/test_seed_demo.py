@@ -141,10 +141,19 @@ def test_connects_the_demo_users_and_leaves_one_request_pending():
     seed()
 
     avery, jordan, sam = demo_users()
-    assert Connection.objects.between(avery, jordan).get().status == "accepted"
+    assert Connection.objects.between(sam, avery).get().status == "accepted"
     assert Connection.objects.between(jordan, sam).get().status == "accepted"
     pending = Connection.objects.pending().get()
-    assert (pending.requested_by, pending.other_user(sam)) == (sam, avery)
+    assert (pending.requested_by, pending.other_user(avery)) == (avery, jordan)
+
+
+@pytest.mark.django_db
+def test_every_pending_invite_went_to_a_connection_of_its_sender():
+    seed()
+
+    for invite in Membership.objects.pending():
+        pair = Connection.objects.accepted().between(invite.user, invite.invited_by)
+        assert pair.exists()
 
 
 @pytest.mark.django_db

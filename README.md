@@ -5,9 +5,9 @@ share gear: only its members see it and the items listed in it. You can create o
 number of inventories, and you have one role in each:
 
 - `member`: sees and borrows the inventory's items, and sees who its admins and owners are.
-- `admin`: also sees every member, invites users and revokes invites, lists and removes
-  their own items, approves and declines borrow requests made through the inventory, and
-  marks those items returned.
+- `admin`: also sees every member, invites their connections and revokes invites, lists
+  and removes their own items, approves and declines borrow requests made through the
+  inventory, and marks those items returned.
 - `owner`: also sets members' roles, removes members, and renames or deletes the
   inventory.
 
@@ -100,6 +100,6 @@ of them, using the password `gear-library-demo`:
 
 Connections:
 
-- Avery and Jordan are connected.
+- Sam and Avery are connected.
 - Jordan and Sam are connected.
-- Sam has sent Avery a request, which is pending.
+- Avery has sent Jordan a request, which is pending.
