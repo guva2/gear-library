@@ -280,7 +280,7 @@ class TestLogin:
         )
 
         assert response.status_code == 200
-        # Django rotates the token at login, so clients must read the cookie again.
+        # Django rotates the CSRF token at login.
         assert response.cookies["csrftoken"].value != token
 
 
