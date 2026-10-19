@@ -16,6 +16,10 @@ services:
 
   backend:
     build: ./backend
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    user: "${UID:?set in .env, see .env.example}:${GID:?set in .env, see .env.example}"
+    volumes:
+      - ./backend:/app
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?set in .env, see .env.example}
       POSTGRES_USER: ${POSTGRES_USER:?set in .env, see .env.example}
@@ -27,6 +31,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        UID: ${UID:?set in .env, see .env.example}
+        GID: ${GID:?set in .env, see .env.example}
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./frontend:/app
+      # Anonymous volume: keeps the image's node_modules instead of the bind mount's.
+      - /app/node_modules
 
 volumes:
   db-data:
