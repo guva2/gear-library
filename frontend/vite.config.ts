@@ -16,9 +16,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api": backend,
-      "/admin": backend,
-      "/static": backend,
+      // Whole path segments only, so `/apiary` and `/administrator` stay with Vite.
+      "^/(api|admin|static)(/|$)": backend,
     },
   },
   test: {

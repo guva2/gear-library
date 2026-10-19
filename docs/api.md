@@ -96,8 +96,9 @@ builds its endpoints. The roles and rules behind "who may call" are in
 ## Borrowing (M7)
 
 A request is made through one inventory. "Loan inventory" below is that inventory.
-The approve, decline, cancel and return bodies carry the `borrower` and `loan_inventory`
-the caller saw. The `409` "the request changed" check compares them with the item.
+The approve, decline, cancel and return bodies carry what the caller saw, and the `409`
+"the request changed" check compares it with the item. Which fields it compares, and the
+owner's mark-returned exception, are in the Concurrency section of `schema.md`.
 
 | Method | Path | Who | Main errors |
 |---|---|---|---|

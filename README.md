@@ -36,7 +36,9 @@ to check again.
 
 Only the frontend port is published to the host. `backend/` and `frontend/` are mounted
 into their containers, so code changes reload without a rebuild. The containers run as
-the `UID` and `GID` in `.env`, so files they write are yours.
+the `UID` and `GID` in `.env`, so files they write are yours. The frontend image bakes
+them in at build time: after changing them, run
+`docker compose up --build --renew-anon-volumes`.
 
 ## Common commands
 
@@ -51,8 +53,9 @@ docker compose down -v                                        # stop and delete 
 docker volume prune                                           # delete unused anonymous volumes
 ```
 
-Each new frontend container gets a new anonymous volume for `node_modules`, and the volume
-stays after the container is removed. `docker volume prune` deletes the unused anonymous
+The frontend's `node_modules` is an anonymous volume. `docker compose run --rm` removes it
+with the container, but `docker compose down` followed by `up`, and `up --renew-anon-volumes`,
+leave the old one behind. `docker volume prune` deletes the unused anonymous
 volumes of every project on this machine. It keeps named volumes such as `db-data`; only
 `--all` deletes those.
 
