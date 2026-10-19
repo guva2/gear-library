@@ -1,9 +1,9 @@
 # API
 
 A draft of the HTTP API. It lists paths, methods, who may call each endpoint and the main
-error codes. Request and response fields are not here; each milestone adds them when it
-builds its endpoints. The roles and rules behind "who may call" are in
-[`schema.md`](schema.md).
+error codes. Request and response fields are filled in for the milestones that have been
+built; each later milestone adds them when it builds its endpoints. The roles and rules
+behind "who may call" are in [`schema.md`](schema.md).
 
 ## Conventions
 
@@ -39,8 +39,8 @@ builds its endpoints. The roles and rules behind "who may call" are in
 | `GET` | `/api/auth/me/` | Logged in. The current user. | `403` when anonymous. |
 
 `register` and `login` check the CSRF token for anonymous callers too, so call
-`/api/auth/csrf/` first. Both replace the `csrftoken` cookie: read it again before the
-next unsafe request.
+`/api/auth/csrf/` first. A successful `register` or `login` replaces the `csrftoken`
+cookie: read it again before the next unsafe request.
 
 ### Phone numbers
 

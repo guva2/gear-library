@@ -8,7 +8,7 @@ User = get_user_model()
 
 class PhoneNumberField(serializers.CharField):
     default_error_messages = {
-        "invalid": "Enter a US phone number: 10 digits, optionally with a leading +1.",
+        "invalid": "Enter a 10-digit US phone number.",
     }
 
     def to_internal_value(self, data):

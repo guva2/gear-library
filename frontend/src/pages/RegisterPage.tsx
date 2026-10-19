@@ -22,7 +22,7 @@ export default function RegisterPage() {
         body: Object.fromEntries(FIELDS.map((field) => [field, form.get(field)])),
       });
       if (!response.ok) {
-        setErrors(await readErrors(response));
+        setErrors(await readErrors(response, FIELDS));
         return;
       }
       setUser((await response.json()) as User);

@@ -4,6 +4,8 @@ import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth, type FromState, type User } from "../auth";
 import { Field, FormErrors, UNREACHABLE, useFocusFirstInvalid } from "../forms";
 
+const FIELDS = ["phone_number", "password"];
+
 export default function LoginPage() {
   const { setUser } = useAuth();
   const navigate = useNavigate();
@@ -17,10 +19,10 @@ export default function LoginPage() {
     try {
       const response = await apiFetch("/api/auth/login/", {
         method: "POST",
-        body: { phone_number: form.get("phone_number"), password: form.get("password") },
+        body: Object.fromEntries(FIELDS.map((field) => [field, form.get(field)])),
       });
       if (!response.ok) {
-        setErrors(await readErrors(response));
+        setErrors(await readErrors(response, FIELDS));
         return;
       }
       setUser((await response.json()) as User);

@@ -3,6 +3,8 @@ from django.db import IntegrityError
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
+from gear_library import views
+
 User = get_user_model()
 
 CSRF_URL = "/api/auth/csrf/"
@@ -51,6 +53,18 @@ def me_payload(user):
         "first_name": user.first_name,
         "last_name": user.last_name,
     }
+
+
+def insert_rival_signup_after_the_duplicate_check(monkeypatch):
+    """Commits a user with PHONE once the view has checked for duplicates, as a
+    concurrent signup for the same number would."""
+    check_password = views.validate_password
+
+    def check_then_insert(password, user=None, password_validators=None):
+        check_password(password, user, password_validators)
+        User(phone_number=PHONE, first_name="Rival", last_name="Signup").save()
+
+    monkeypatch.setattr(views, "validate_password", check_then_insert)
 
 
 @pytest.mark.django_db
@@ -160,11 +174,25 @@ class TestRegister:
         }
         assert User.objects.count() == 1
 
-    def test_duplicate_that_passes_validation_hits_the_unique_index(
-        self, client, user, monkeypatch
+    def test_duplicate_inserted_after_full_clean_hits_the_unique_index(
+        self, client, monkeypatch
     ):
-        # Two signups for one number can both pass full_clean before either inserts.
+        insert_rival_signup_after_the_duplicate_check(monkeypatch)
+        # The rival's insert also lands after full_clean's own uniqueness check.
         monkeypatch.setattr(User, "validate_unique", lambda self, exclude=None: None)
+
+        response = client.post(REGISTER_URL, REGISTRATION, format="json")
+
+        assert response.status_code == 400
+        assert response.json() == {
+            "phone_number": ["A user with this phone number already exists."]
+        }
+        assert User.objects.count() == 1
+
+    def test_duplicate_inserted_before_full_clean_is_reported_on_its_field(
+        self, client, monkeypatch
+    ):
+        insert_rival_signup_after_the_duplicate_check(monkeypatch)
 
         response = client.post(REGISTER_URL, REGISTRATION, format="json")
 
@@ -251,7 +279,7 @@ class TestLogin:
         )
 
         assert response.status_code == 400
-        assert list(response.json()) == ["phone_number"]
+        assert response.json() == {"phone_number": ["Enter a 10-digit US phone number."]}
 
     def test_requires_both_fields(self, client):
         response = client.post(LOGIN_URL, {}, format="json")

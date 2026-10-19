@@ -53,10 +53,13 @@ export async function apiFetch(path: string, options: ApiOptions = {}): Promise<
 }
 
 /**
- * Reads a DRF error body. Field errors keep their field name; `non_field_errors` and
- * `detail` go under `form`.
+ * Reads a DRF error body. Errors for one of `fields` keep their field name; every other
+ * key goes under `form`, so pass exactly the fields the page shows next to an input.
  */
-export async function readErrors(response: Response): Promise<FieldErrors> {
+export async function readErrors(
+  response: Response,
+  fields: readonly string[],
+): Promise<FieldErrors> {
   const body: unknown = await response.json().catch(() => null);
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { form: [GENERIC_ERROR] };
@@ -67,7 +70,7 @@ export async function readErrors(response: Response): Promise<FieldErrors> {
       (message): message is string => typeof message === "string",
     );
     if (messages.length === 0) continue;
-    const field = key === "non_field_errors" || key === "detail" ? "form" : key;
+    const field = fields.includes(key) ? key : "form";
     errors[field] = [...(errors[field] ?? []), ...messages];
   }
   return Object.keys(errors).length > 0 ? errors : { form: [GENERIC_ERROR] };

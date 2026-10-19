@@ -186,6 +186,17 @@ describe("register page", () => {
     expect(screen.getByLabelText("First name")).toBeValid();
   });
 
+  it("shows an error for a field the page has no input for", async () => {
+    fakeBackend({
+      "POST /api/auth/register/": json(400, { __all__: ["Something about the account."] }),
+    });
+    renderAt("/register");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something about the account.");
+  });
+
   it("moves focus to the first invalid field after a failed submit", async () => {
     fakeBackend({
       "POST /api/auth/register/": json(400, {

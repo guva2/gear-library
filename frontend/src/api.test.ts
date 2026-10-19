@@ -148,9 +148,26 @@ describe("readErrors", () => {
       { status: 400 },
     );
 
-    expect(await readErrors(response)).toEqual({
+    expect(await readErrors(response, ["phone_number"])).toEqual({
       phone_number: ["Bad number."],
       form: ["Wrong."],
+    });
+  });
+
+  it("puts model-wide errors and errors for fields the page does not show under `form`", async () => {
+    const { readErrors } = await import("./api");
+    const response = new Response(
+      JSON.stringify({
+        __all__: ["Model-wide."],
+        password: ["Too short."],
+        is_staff: ["Not allowed."],
+      }),
+      { status: 400 },
+    );
+
+    expect(await readErrors(response, ["password"])).toEqual({
+      password: ["Too short."],
+      form: ["Model-wide.", "Not allowed."],
     });
   });
 
@@ -160,13 +177,13 @@ describe("readErrors", () => {
       status: 403,
     });
 
-    expect(await readErrors(response)).toEqual({ form: ["You are already logged in."] });
+    expect(await readErrors(response, [])).toEqual({ form: ["You are already logged in."] });
   });
 
   it("falls back to a generic message for a body that is not an error report", async () => {
     const { readErrors } = await import("./api");
 
-    expect(await readErrors(new Response("<html></html>", { status: 502 }))).toEqual({
+    expect(await readErrors(new Response("<html></html>", { status: 502 }), [])).toEqual({
       form: ["Something went wrong. Try again."],
     });
   });
