@@ -121,26 +121,141 @@ No body. `204` with no body. The session ends.
 | `POST` | `/api/inventories/` | Logged in. The caller becomes its owner. | `400` |
 | `GET` | `/api/inventories/{id}/` | Member. | `404` |
 | `PATCH` | `/api/inventories/{id}/` | Owner. Renames it. | `400`, `403`, `404` |
-| `DELETE` | `/api/inventories/{id}/` | Owner. | `403`, `404` |
+| `DELETE` | `/api/inventories/{id}/` | Owner. Deletes it with its memberships and invites. | `403`, `404` |
+
+Every endpoint under `/api/inventories/{id}/` checks the caller's membership and role
+before it reads the body: a non-member gets `404` and a member without the role gets
+`403`, whatever the body holds.
+
+### Inventory
+
+The body of the inventory responses.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | |
+| `name` | string | 1 to 32 characters. |
+| `role` | string | The caller's role: `member`, `admin` or `owner`. |
+
+`GET /api/inventories/` returns a list of [Inventory](#inventory), sorted by name.
+
+### `POST /api/inventories/` and `PATCH /api/inventories/{id}/`
+
+| Field | Type | |
+|---|---|---|
+| `name` | string | Required. 1 to 32 characters after trimming spaces. |
+
+`POST` returns `201` with the new [Inventory](#inventory), whose `role` is `owner`. `PATCH`
+returns `200` with the renamed [Inventory](#inventory). `400` errors are keyed by `name`.
+
+`DELETE` returns `204` with no body.
 
 ### Members and roles
 
 | Method | Path | Who | Main errors |
 |---|---|---|---|
-| `GET` | `/api/inventories/{id}/members/` | Member. | `404` |
+| `GET` | `/api/inventories/{id}/members/` | Member. What the caller sees depends on their role. | `404` |
 | `PATCH` | `/api/inventories/{id}/members/{user_id}/` | Owner. Sets the member's role. | `400`, `403`, `404`, `409`: would leave no owner. |
 | `DELETE` | `/api/inventories/{id}/members/{user_id}/` | Owner, to remove a member. Any member, for their own `user_id`, to leave. | `403`, `404`, `409`: would leave no owner. |
+
+`GET` returns a list sorted by last name, then first name. An admin or owner gets every
+member as a [Member](#member). A `member` gets only the admins and owners, each with
+`first_name` and `last_name` and nothing else.
+
+#### Member
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | The user's id. |
+| `first_name` | string | |
+| `last_name` | string | |
+| `phone_number` | string | 10 digits. |
+| `role` | string | `member`, `admin` or `owner`. |
+
+#### `PATCH /api/inventories/{id}/members/{user_id}/`
+
+| Field | Type | |
+|---|---|---|
+| `role` | string | Required. `member`, `admin` or `owner`. |
+
+`200` with the [Member](#member). `404` when `user_id` is not a member. `409`
+`{"detail": "An inventory must keep at least one owner."}` when the last owner would take
+a lower role.
+
+`DELETE` returns `204` with no body. The last owner cannot leave or be removed (`409`).
 
 ### Invites
 
 | Method | Path | Who | Main errors |
 |---|---|---|---|
-| `GET` | `/api/inventories/{id}/invites/` | Owner. The inventory's pending invites. | `403`, `404` |
-| `POST` | `/api/inventories/{id}/invites/` | Owner. Invites a user by phone number. | `400`: no such user. `403`, `404`. `409`: already a member, or an invite is pending. |
-| `POST` | `/api/invites/{id}/revoke/` | Owner of the invite's inventory. | `403`, `404`, `409`: not pending. |
+| `GET` | `/api/inventories/{id}/invites/` | Admin. The inventory's pending invites. | `403`, `404` |
+| `POST` | `/api/inventories/{id}/invites/` | Admin. Invites a user by phone number. | `400`: invalid number, or no such user. `403`, `404`. `409`: already a member, or an invite is pending. |
+| `POST` | `/api/invites/{id}/revoke/` | Admin of the invite's inventory. Any pending invite. | `403`. `404`: no such invite. `409`: not a pending invite. |
 | `GET` | `/api/invites/` | Logged in. The caller's pending invites. | |
-| `POST` | `/api/invites/{id}/accept/` | The invitee. Joins as `member`. | `404`, `409`: not pending, or already a member. |
-| `POST` | `/api/invites/{id}/decline/` | The invitee. | `404`, `409`: not pending. |
+| `POST` | `/api/invites/{id}/accept/` | The invitee. Joins as `member`. | `403`. `404`: no such invite. |
+| `POST` | `/api/invites/{id}/decline/` | The invitee. | `403`. `404`: no such invite. `409`: not a pending invite. |
+
+An invite is a pending membership, and an invite `id` is that membership's id. Accepting
+makes it an active membership with the same id. Declining and revoking delete it, so its
+id is then unknown (`404`).
+
+Under `/api/invites/{id}/`, an invite is visible only to its invitee and to the admins and
+owners of its inventory. Anyone else, including a `member` of the inventory and another
+invitee, gets `404`, whether the invite is pending, accepted or gone. A caller who sees
+the invite but may not take the action gets `403`: an admin who accepts or declines, or an
+invitee who revokes.
+
+A user with a pending invite is not a member: every `/api/inventories/{id}/` path of that
+inventory returns `404` for them, and the inventory is not in their `GET /api/inventories/`.
+
+#### Inventory invite
+
+What `GET` and `POST /api/inventories/{id}/invites/` return. `GET` returns a list, oldest
+first.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | |
+| `invitee` | object | Only `phone_number` (10 digits). The name and user id appear in the members list once the invitee has joined. |
+| `invited_by` | object | `first_name` and `last_name`. |
+
+#### `POST /api/inventories/{id}/invites/`
+
+| Field | Type | |
+|---|---|---|
+| `phone_number` | string | Required. See [Phone numbers](#phone-numbers). |
+
+`201` with the new [Inventory invite](#inventory-invite). `400` errors are keyed by
+`phone_number`:
+
+```json
+{"phone_number": ["No user has this phone number."]}
+```
+
+`409` `{"detail": "This user is already a member or has a pending invite."}` when the user
+is a member or already invited. After a decline or revoke the same number can be invited
+again.
+
+#### My invite
+
+What `GET /api/invites/` returns, as a list, oldest first. The invitee is not a member yet,
+so it carries only the inventory's name.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | |
+| `inventory_name` | string | |
+| `invited_by` | object | `first_name` and `last_name`. |
+
+#### Answering an invite
+
+The three `POST /api/invites/{id}/` actions take no body. `accept` returns `200` with the
+[Inventory](#inventory) just joined, whose `role` is `member`. Accepting is idempotent:
+accepting an accepted invite again returns `200` with the inventory and the member's
+current role. `decline` and `revoke` return `204` with no body. Declining or revoking an
+accepted invite is a `409` `{"detail": "This is not a pending invite."}`. An invite
+that was declined or revoked, or whose member has left, is a `404`
+`{"detail": "Invite not found."}`.
 
 ## Gear (M5)
 

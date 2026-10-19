@@ -6,6 +6,8 @@ from django.db import models
 # [0-9], not \d: Python's \d matches any Unicode digit, not only ASCII 0-9.
 PHONE_NUMBER_PATTERN = r"^[0-9]{10}$"
 
+ONE_MEMBERSHIP_PER_USER = "gear_library_membership_one_per_user"
+
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -62,3 +64,70 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.phone_number
+
+
+class Inventory(models.Model):
+    name = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Role(models.TextChoices):
+    MEMBER = "member"
+    ADMIN = "admin"
+    OWNER = "owner"
+
+
+class MembershipStatus(models.TextChoices):
+    PENDING = "pending"
+    ACTIVE = "active"
+
+
+class MembershipQuerySet(models.QuerySet):
+    def active(self):
+        """The memberships that grant access. A pending one is an invite and grants none."""
+        return self.filter(status=MembershipStatus.ACTIVE)
+
+    def pending(self):
+        return self.filter(status=MembershipStatus.PENDING)
+
+
+class Membership(models.Model):
+    """A user in an inventory. A `pending` membership is an invite the user has not
+    accepted yet."""
+
+    inventory = models.ForeignKey(
+        Inventory, on_delete=models.CASCADE, related_name="memberships"
+    )
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="memberships")
+    role = models.CharField(max_length=6, choices=Role.choices)
+    status = models.CharField(max_length=7, choices=MembershipStatus.choices)
+    # Null for the membership that created the inventory.
+    invited_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, null=True, related_name="invites_sent"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = MembershipQuerySet.as_manager()
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(role__in=Role.values),
+                name="gear_library_membership_role_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=MembershipStatus.values),
+                name="gear_library_membership_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status=MembershipStatus.PENDING)
+                | models.Q(role=Role.MEMBER),
+                name="gear_library_membership_pending_is_member",
+            ),
+            models.UniqueConstraint(
+                fields=["inventory", "user"], name=ONE_MEMBERSHIP_PER_USER
+            ),
+        ]

@@ -53,37 +53,30 @@ Built in M4. A group of users who share gear.
 ### `Membership` (`gear_library_membership`)
 
 Built in M4. One row per user in an inventory. A user can be a member of any number of
-inventories.
+inventories. A `pending` row is an invite: the user has been invited and has not
+accepted. Only an `active` row makes the user a member.
 
 | Column | Type | Rules |
 |---|---|---|
 | `inventory_id` | → `Inventory` | `on_delete=models.CASCADE`. |
 | `user_id` | → `User` | `on_delete=models.PROTECT`. |
 | `role` | `varchar(6)` | `member`, `admin` or `owner`. |
+| `status` | `varchar(7)` | `pending` or `active`. |
+| `invited_by_id` | → `User` | Nullable. `on_delete=models.PROTECT`. The user who sent the invite. Null for the membership that created the inventory. |
 | `created_at` | `timestamptz` | |
 
-- Unique on (`inventory_id`, `user_id`).
+- Unique on (`inventory_id`, `user_id`): one row per user and inventory, pending or
+  active. It refuses an invite to a member and a second invite to the same user.
+- Check: `status = 'pending'` implies `role = 'member'`.
 - Each role has the rights of the roles before it:
-  - `member`: sees the inventory and its items, and requests to borrow its items.
-  - `admin`: also lists their own items in the inventory and removes them, approves and
-    declines borrow requests made through the inventory, and marks those items returned.
-  - `owner`: also invites users, revokes invites, removes members, sets any member's role,
-    removes any item from the inventory, renames the inventory and deletes it.
-
-### `InventoryInvite` (`gear_library_inventoryinvite`)
-
-Built in M4.
-
-| Column | Type | Rules |
-|---|---|---|
-| `inventory_id` | → `Inventory` | `on_delete=models.CASCADE`. |
-| `invitee_id` | → `User` | `on_delete=models.PROTECT`. |
-| `invited_by_id` | → `User` | `on_delete=models.PROTECT`. |
-| `status` | `varchar(8)` | `pending`, `accepted`, `declined` or `revoked`. |
-| `created_at` | `timestamptz` | |
-
-- Partial unique index on (`inventory_id`, `invitee_id`) where `status = 'pending'`: at
-  most one pending invite per inventory and invitee.
+  - `member`: sees the inventory and its items, sees the names of its admins and owners,
+    and requests to borrow its items.
+  - `admin`: also sees every member with their phone number and role, invites users, sees
+    and revokes any pending invite, lists their own items in the inventory and removes
+    them, approves and declines borrow requests made through the inventory, and marks
+    those items returned.
+  - `owner`: also removes members, sets any member's role, removes any item from the
+    inventory, renames the inventory and deletes it.
 
 ### `Item` (`gear_library_item`)
 
@@ -126,15 +119,42 @@ These rules span tables, so the database cannot check them alone.
 ### Users
 
 - The app never deletes or deactivates a user. `is_active` stays `true`. The `PROTECT`
-  foreign keys make an ORM delete of a user with memberships, invites or items fail.
+  foreign keys make an ORM delete fail for a user who has memberships or items, or who
+  is the `invited_by` of a membership.
 
 ### Concurrency
 
+- Setting a role, removing a member and leaving lock the inventory's row
+  (`select_for_update`), then re-read the acting user's membership and role, the target
+  membership and the active owners. Two of these changes to one inventory run one at a
+  time, so the inventory always keeps an owner.
+- Deleting an inventory locks its row (`select_for_update`), then deletes its memberships
+  and the row. Every operation that locks the inventory row does so before it touches a
+  membership row, so a delete and a role change, removal or leave on the same inventory
+  run one at a time.
+- Renaming an inventory, inviting, accepting, declining and revoking take no inventory
+  lock and no explicit lock.
+- Inviting inserts a pending membership. The unique index on (`inventory_id`, `user_id`)
+  refuses it when the user is already a member or invited (`409`). Two invites to the same
+  user at once: the second waits on the index until the first commits, then gets `409`.
+- Accepting is one conditional update: `SET status = 'active'` where the row is the
+  caller's and `status = 'pending'`. If the row is already active, accepting returns it
+  (`200`). If the row is gone, accepting gets `404`.
+- Declining and revoking are each one conditional delete of the row where
+  `status = 'pending'`. If the row is gone, the action gets `404`. If it is active, it was
+  accepted in the meantime and the action gets `409`.
+- An accept and a delete of the same inventory wait on the membership row, so they run one
+  at a time. A delete after the accept deletes the new member. An accept after the delete
+  gets `404`.
+- The foreign key from memberships to the inventory is checked at commit. An invite whose
+  inventory was deleted first gets `404`. An invite that commits while a delete holds the
+  inventory lock waits for the delete, then gets `404`. A delete that starts after an
+  invite commits deletes the new pending membership with the inventory.
 - These operations first lock the inventory's row (`select_for_update`): every change to
-  its memberships, invites or listings, and every borrow request, approve, decline, cancel
-  or mark returned through it. An operation that touches several inventories, such as
-  deleting an item listed in several, locks them in ascending `id` order. Inventory rows
-  are locked before item rows.
+  its listings, and every borrow request, approve, decline, cancel or mark returned
+  through it. An operation that touches several inventories, such as deleting an item
+  listed in several, locks them in ascending `id` order. Inventory rows are locked before
+  item rows.
 - After locking, the operation re-reads and re-checks the rows it depends on, including the
   acting user's own membership and role.
 - Approve, decline, cancel and mark returned are each one conditional update on the item.
@@ -148,13 +168,31 @@ These rules span tables, so the database cannot check them alone.
 ### Inventories and roles
 
 - Creating an inventory makes the creator its owner.
-- An inventory always has at least one owner. The last owner cannot leave, be removed, or
+- An inventory must keep at least one owner. The last owner cannot leave, be removed, or
   take a lower role. They must make another member an owner or delete the inventory.
-- Only owners invite and revoke invites. Invites go only to users who are not members.
-  Accepting checks this again. The invitee joins with the `member` role. A pending invite
-  stays valid if its sender loses the owner role.
-- Only members of an inventory see it and the items listed in it. An item's owner always
+- Admins and owners invite users and revoke any pending invite of the inventory. Only
+  owners set roles and remove members. Owners set any member's role, including another
+  owner's and their own.
+- An invite is a pending membership. Invites go only to users who are not members, and a
+  user has at most one pending invite per inventory. Accepting makes the membership
+  active with the `member` role, and accepting again succeeds while the membership is
+  active. Declining or revoking deletes the pending membership, after which the user can
+  be invited again. A pending invite stays valid if its sender leaves or takes the
+  `member` role.
+- A pending membership gives no access. Its user is treated as a non-member of the
+  inventory everywhere, is not counted as an owner, and appears only in the inventory's
+  pending invites.
+- Only the invited user and the inventory's active admins and owners see a pending
+  membership through the invite actions. Anyone else gets `404`, whether the row is
+  pending, active or gone.
+- Only active members of an inventory see it and the items listed in it. An item's owner always
   sees it. A borrower also sees the item they hold.
+- A `member` sees only the first and last names of the inventory's admins and owners: not
+  the other members, and no phone numbers. Admins and owners see every member with name,
+  phone number and role. They see each pending invite of the inventory with the invitee's
+  phone number only: the invitee's name and user id stay hidden until they join.
+- An invitee sees their own pending invites, with the inventory's name and the inviter's
+  name, without becoming a member.
 
 ### Listings
 
@@ -184,6 +222,7 @@ These rules span tables, so the database cannot check them alone.
 
 ### Deleting
 
-- Deleting an inventory deletes its memberships, invites and listings. The items stay with
-  their owners. Pending requests through it are cancelled first, in the same transaction;
-  items on loan through it keep their borrower, and their `loan_inventory_id` becomes null.
+- Deleting an inventory deletes its memberships, pending ones included, and its listings.
+  It locks the inventory first, then deletes its memberships. The items stay with their
+  owners. Pending requests through it are cancelled first, in the same transaction; items
+  on loan through it keep their borrower, and their `loan_inventory_id` becomes null.

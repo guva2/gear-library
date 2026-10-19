@@ -1,6 +1,7 @@
 import { BrowserRouter, Link, Outlet, Route, Routes } from "react-router";
 import { AuthProvider, RequireAuth } from "./auth";
 import HomePage from "./pages/HomePage";
+import InventoryPage from "./pages/InventoryPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 
@@ -33,6 +34,14 @@ export function AppRoutes() {
             element={
               <RequireAuth>
                 <HomePage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/inventories/:id"
+            element={
+              <RequireAuth>
+                <InventoryPage />
               </RequireAuth>
             }
           />

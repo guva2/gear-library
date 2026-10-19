@@ -1,22 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { AppRoutes } from "./App";
 import { ADA, empty, fakeBackend, json } from "./test-backend";
+import { fillIn, renderAt } from "./test-render";
 
 const ANONYMOUS = json(403, { detail: "Authentication credentials were not provided." });
-
-function renderAt(path: string) {
-  render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-    </MemoryRouter>,
-  );
-}
-
-function fillIn(label: string, value: string) {
-  fireEvent.change(screen.getByLabelText(label), { target: { value } });
-}
 
 describe("home page", () => {
   it("shows who is signed in, their phone number and the health line", async () => {
@@ -230,6 +217,6 @@ describe("register page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     await screen.findByText("This field may not be blank.");
-    expect(screen.getByLabelText("First name")).toHaveFocus();
+    await waitFor(() => expect(screen.getByLabelText("First name")).toHaveFocus());
   });
 });

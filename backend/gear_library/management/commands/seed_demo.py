@@ -2,18 +2,39 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
+from gear_library.models import Inventory, Membership, MembershipStatus, Role
+
 DEMO_PASSWORD = "gear-library-demo"
 
 # 555-01xx numbers are reserved for fictional use.
+AVERY, JORDAN, SAM = "5555550101", "5555550102", "5555550103"
 DEMO_USERS = [
-    ("5555550101", "Avery", "Brooks"),
-    ("5555550102", "Jordan", "Diaz"),
-    ("5555550103", "Sam", "Okafor"),
+    (AVERY, "Avery", "Brooks"),
+    (JORDAN, "Jordan", "Diaz"),
+    (SAM, "Sam", "Okafor"),
+]
+
+# Each inventory's first member is its owner, and is how a later run recognises it.
+DEMO_INVENTORIES = [
+    {
+        "name": "Climbing Club",
+        "members": [(AVERY, Role.OWNER), (JORDAN, Role.ADMIN), (SAM, Role.MEMBER)],
+        "invites": [],
+    },
+    {
+        "name": "Camping Crew",
+        "members": [(JORDAN, Role.OWNER), (SAM, Role.ADMIN)],
+        # (invitee, invited by)
+        "invites": [(AVERY, SAM)],
+    },
 ]
 
 
 class Command(BaseCommand):
-    help = "Create the demo users. Users that already exist are left unchanged."
+    help = (
+        "Create the demo users and their inventories. Users and demo inventories that "
+        "already exist are left unchanged."
+    )
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -31,3 +52,32 @@ class Command(BaseCommand):
             created += 1
         existing = len(DEMO_USERS) - created
         self.stdout.write(f"Created {created} demo users; {existing} already existed.")
+
+        demo_phone_numbers = [phone_number for phone_number, _, _ in DEMO_USERS]
+        users = User.objects.in_bulk(demo_phone_numbers, field_name="phone_number")
+        created = 0
+        for demo in DEMO_INVENTORIES:
+            owner_phone = demo["members"][0][0]
+            if Membership.objects.active().filter(
+                inventory__name=demo["name"], user=users[owner_phone]
+            ).exists():
+                continue
+            inventory = Inventory.objects.create(name=demo["name"])
+            for phone_number, role in demo["members"]:
+                Membership.objects.create(
+                    inventory=inventory,
+                    user=users[phone_number],
+                    role=role,
+                    status=MembershipStatus.ACTIVE,
+                )
+            for invitee, invited_by in demo["invites"]:
+                Membership.objects.create(
+                    inventory=inventory,
+                    user=users[invitee],
+                    role=Role.MEMBER,
+                    status=MembershipStatus.PENDING,
+                    invited_by=users[invited_by],
+                )
+            created += 1
+        existing = len(DEMO_INVENTORIES) - created
+        self.stdout.write(f"Created {created} demo inventories; {existing} already existed.")
