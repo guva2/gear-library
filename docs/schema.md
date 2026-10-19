@@ -103,8 +103,7 @@ It is one physical object, so its loan state is on this row, not per inventory.
 - Check, one of:
   - `available`, with `borrower_id` and `loan_inventory_id` both null.
   - `requested`, with `borrower_id` and `loan_inventory_id` both set.
-  - `on_loan`, with `borrower_id` set. `loan_inventory_id` is null once that inventory is
-    deleted.
+  - `on_loan`, with `borrower_id` set. `loan_inventory_id` may be null.
 - Check: `borrower_id <> owner_id`.
 - There is no loan history. The row holds only the current loan state.
 
@@ -131,15 +130,20 @@ These rules span tables, so the database cannot check them alone.
 
 ### Concurrency
 
-- Every change to an inventory's memberships, invites or listings, and every borrow
-  request through it, first locks that inventory's row (`select_for_update`). An operation
-  that touches several inventories, such as deleting an item listed in several, locks them
-  in ascending `id` order.
+- These operations first lock the inventory's row (`select_for_update`): every change to
+  its memberships, invites or listings, and every borrow request, approve, decline, cancel
+  or mark returned through it. An operation that touches several inventories, such as
+  deleting an item listed in several, locks them in ascending `id` order. Inventory rows
+  are locked before item rows.
 - After locking, the operation re-reads and re-checks the rows it depends on, including the
   acting user's own membership and role.
 - Approve, decline, cancel and mark returned are each one conditional update on the item.
   It matches the `loan_status`, `borrower_id` and `loan_inventory_id` the acting user saw.
-  If no row matches, the request changed in the meantime and the action is rejected.
+  The item owner's mark returned matches only `loan_status` and `borrower_id`. If no row
+  matches, the request changed in the meantime and the action is rejected.
+- The automatic cancels are conditional updates too: they match `loan_status = 'requested'`
+  and the `loan_inventory_id` being left or removed.
+- Deleting an item locks its inventories, then the item row, then re-checks `loan_status`.
 
 ### Inventories and roles
 
@@ -170,9 +174,9 @@ These rules span tables, so the database cannot check them alone.
   returned.
 - Admins and owners of the loan inventory approve and decline requests. The borrower
   cancels while the request is pending.
-- Admins and owners of the loan inventory mark an item returned. The item's owner can
-  always mark it returned, so a loan stays closable after its listing or loan inventory is
-  gone.
+- Admins and owners of the loan inventory mark an item returned while the item is listed
+  there. The item's owner can always mark it returned, so a loan stays closable after its
+  listing or loan inventory is gone.
 - The borrower cannot approve their own request or mark their own loan returned.
 - A pending request is cancelled when the item leaves the loan inventory, when the
   requester leaves or is removed from it, or when the item is deleted.
