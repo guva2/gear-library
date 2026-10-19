@@ -6,6 +6,9 @@ from django.db import models
 # [0-9], not \d: Python's \d matches any Unicode digit, not only ASCII 0-9.
 PHONE_NUMBER_PATTERN = r"^[0-9]{10}$"
 
+ONE_MEMBERSHIP_PER_USER = "gear_library_membership_one_per_user"
+ONE_PENDING_INVITE = "gear_library_inventoryinvite_one_pending"
+
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -93,7 +96,7 @@ class Membership(models.Model):
                 name="gear_library_membership_role_valid",
             ),
             models.UniqueConstraint(
-                fields=["inventory", "user"], name="gear_library_membership_one_per_user"
+                fields=["inventory", "user"], name=ONE_MEMBERSHIP_PER_USER
             ),
         ]
 
@@ -127,6 +130,6 @@ class InventoryInvite(models.Model):
             models.UniqueConstraint(
                 fields=["inventory", "invitee"],
                 condition=models.Q(status=InviteStatus.PENDING),
-                name="gear_library_inventoryinvite_one_pending",
+                name=ONE_PENDING_INVITE,
             ),
         ]

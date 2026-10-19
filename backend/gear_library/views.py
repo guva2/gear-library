@@ -146,8 +146,7 @@ def inventory_list(request):
 
 
 # Unsafe views check the caller's access before reading the body, so a non-member gets
-# 404 and a member without the role gets 403 whatever they send. This check takes no lock;
-# it only decides which error comes first.
+# 404 and a member without the role gets 403 whatever they send.
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -155,12 +154,12 @@ def inventory_detail(request, inventory_id):
     if request.method == "GET":
         membership = inventories.get_membership(request.user, inventory_id)
         return Response(InventorySerializer(membership).data)
-    inventories.get_membership(request.user, inventory_id, Role.OWNER)
+    actor = inventories.get_membership(request.user, inventory_id, Role.OWNER)
     if request.method == "DELETE":
-        inventories.delete_inventory(request.user, inventory_id)
+        inventories.delete_inventory(actor)
         return Response(status=status.HTTP_204_NO_CONTENT)
     name = _validated(InventoryNameSerializer, request)["name"]
-    membership = inventories.rename_inventory(request.user, inventory_id, name)
+    membership = inventories.rename_inventory(actor, name)
     return Response(InventorySerializer(membership).data)
 
 
@@ -183,18 +182,18 @@ def member_detail(request, inventory_id, user_id):
     if request.method == "DELETE":
         inventories.remove_member(request.user, inventory_id, user_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
-    inventories.get_membership(request.user, inventory_id, Role.OWNER)
+    actor = inventories.get_membership(request.user, inventory_id, Role.OWNER)
     role = _validated(RoleSerializer, request)["role"]
-    membership = inventories.set_role(request.user, inventory_id, user_id, role)
+    membership = inventories.set_role(actor, user_id, role)
     return Response(MemberSerializer(membership).data)
 
 
 @api_view(["GET", "POST"])
 def inventory_invites(request, inventory_id):
-    inventories.get_membership(request.user, inventory_id, Role.ADMIN)
+    actor = inventories.get_membership(request.user, inventory_id, Role.ADMIN)
     if request.method == "POST":
         phone_number = _validated(NewInviteSerializer, request)["phone_number"]
-        invite = inventories.invite(request.user, inventory_id, phone_number)
+        invite = inventories.invite(actor, phone_number)
         return Response(InventoryInviteSerializer(invite).data, status=status.HTTP_201_CREATED)
     invites = (
         InventoryInvite.objects.filter(inventory_id=inventory_id, status=InviteStatus.PENDING)

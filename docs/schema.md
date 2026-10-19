@@ -133,11 +133,21 @@ These rules span tables, so the database cannot check them alone.
 
 ### Concurrency
 
+- Inventory, membership and role changes take no lock. The at-least-one-owner rule is
+  checked without one, so two owners who step down at the same moment can both succeed
+  and leave the inventory with no owner.
+- Accept, decline and revoke are each one conditional update on the invite: set the new
+  status only if `status = 'pending'`. If no row matches, the invite changed in the
+  meantime and the action gets `409`.
+- The unique index on memberships and the partial unique index on pending invites refuse
+  duplicates. An invite or accept that hits one of them gets `409`. Accepting sets the
+  invite's status and adds the membership in one transaction, so a refused accept leaves
+  the invite pending.
 - These operations first lock the inventory's row (`select_for_update`): every change to
-  its memberships, invites or listings, and every borrow request, approve, decline, cancel
-  or mark returned through it. An operation that touches several inventories, such as
-  deleting an item listed in several, locks them in ascending `id` order. Inventory rows
-  are locked before item rows.
+  its listings, and every borrow request, approve, decline, cancel or mark returned
+  through it. An operation that touches several inventories, such as deleting an item
+  listed in several, locks them in ascending `id` order. Inventory rows are locked before
+  item rows.
 - After locking, the operation re-reads and re-checks the rows it depends on, including the
   acting user's own membership and role.
 - Approve, decline, cancel and mark returned are each one conditional update on the item.
@@ -151,15 +161,16 @@ These rules span tables, so the database cannot check them alone.
 ### Inventories and roles
 
 - Creating an inventory makes the creator its owner.
-- An inventory always has at least one owner. The last owner cannot leave, be removed, or
+- An inventory must keep at least one owner. The last owner cannot leave, be removed, or
   take a lower role. They must make another member an owner or delete the inventory.
 - Admins and owners invite users and revoke any pending invite of the inventory. Only
   owners set roles and remove members. Owners set any member's role, including another
   owner's and their own.
 - Invites go only to users who are not members, and a user has at most one pending invite
-  per inventory. Accepting checks membership again. The invitee always joins with the
-  `member` role. After a decline or revoke the user can be invited again. A pending invite
-  stays valid if its sender leaves or takes the `member` role.
+  per inventory. Accepting fails if the invitee became a member after the invite was sent.
+  The invitee always joins with the `member` role. After a decline or revoke the user can
+  be invited again. A pending invite stays valid if its sender leaves or takes the
+  `member` role.
 - Only members of an inventory see it and the items listed in it. An item's owner always
   sees it. A borrower also sees the item they hold.
 - A `member` sees only the first and last names of the inventory's admins and owners: not
