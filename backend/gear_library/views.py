@@ -18,7 +18,6 @@ from . import connections, inventories
 from .authentication import CsrfSessionAuthentication
 from .models import Connection, ConnectionStatus, Membership, Role
 from .serializers import (
-    ConnectionRequestSerializer,
     ConnectionSerializer,
     InventoryInviteSerializer,
     InventoryNameSerializer,
@@ -28,8 +27,10 @@ from .serializers import (
     MyInviteSerializer,
     PersonNameSerializer,
     PhoneNumberSerializer,
+    ReceivedRequestSerializer,
     RegisterSerializer,
     RoleSerializer,
+    SentRequestSerializer,
     UserSerializer,
 )
 
@@ -238,9 +239,10 @@ def revoke_invite(request, invite_id):
 
 
 def _connection_data(connection, user):
+    """The response to a request the caller sent: pending, or accepted at once."""
     if connection.status == ConnectionStatus.ACCEPTED:
         return ConnectionSerializer(connection, context={"user": user}).data
-    return ConnectionRequestSerializer(connection, context={"user": user}).data
+    return SentRequestSerializer(connection, context={"user": user}).data
 
 
 def _connections_of(user):
@@ -274,8 +276,8 @@ def connection_requests(request):
     context = {"user": request.user}
     return Response(
         {
-            "received": ConnectionRequestSerializer(received, many=True, context=context).data,
-            "sent": ConnectionRequestSerializer(sent, many=True, context=context).data,
+            "received": ReceivedRequestSerializer(received, many=True, context=context).data,
+            "sent": SentRequestSerializer(sent, many=True, context=context).data,
         }
     )
 

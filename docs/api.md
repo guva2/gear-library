@@ -264,7 +264,7 @@ that was declined or revoked, or whose member has left, is a `404`
 | `GET` | `/api/connections/` | Logged in. The caller's accepted connections. | |
 | `GET` | `/api/connections/requests/` | Logged in. The caller's pending requests, received and sent. | |
 | `POST` | `/api/connections/` | Logged in. Sends a request by phone number, or accepts the other user's pending request. | `400`: invalid number, no such user, or the caller's own number. `409`: already connected, or the caller's request is pending. |
-| `POST` | `/api/connections/{id}/accept/` | The user who received the request. | `403`. `404`: no such connection. `409`: not a pending request. |
+| `POST` | `/api/connections/{id}/accept/` | The user who received the request. | `403`. `404`: no such connection. |
 | `POST` | `/api/connections/{id}/decline/` | The user who received the request. | `403`. `404`: no such connection. `409`: not a pending request. |
 | `POST` | `/api/connections/{id}/cancel/` | The user who sent the request. | `403`. `404`: no such connection. `409`: not a pending request. |
 | `DELETE` | `/api/connections/{id}/` | Either user of an accepted connection. | `404`: no such connection. `409`: a pending request. |
@@ -290,18 +290,19 @@ last name, then first name.
 
 ### Request
 
-A pending request, sent or received.
+A pending request. A received request shows who sent it, and a sent request shows only the
+number it went to, until it is accepted.
 
 | Field | Type | |
 |---|---|---|
 | `id` | integer | |
 | `status` | string | `pending`. |
-| `user` | object | The other user: `first_name` and `last_name` only. |
+| `user` | object | The other user. Received: `first_name` and `last_name` only. Sent: `phone_number` (10 digits) only, with no name and no `id`. |
 
 `GET /api/connections/requests/` returns both lists, each oldest first:
 
 ```json
-{"received": [{"id": 4, "status": "pending", "user": {"first_name": "Sam", "last_name": "Okafor"}}], "sent": []}
+{"received": [{"id": 4, "status": "pending", "user": {"first_name": "Sam", "last_name": "Okafor"}}], "sent": [{"id": 5, "status": "pending", "user": {"phone_number": "5551230004"}}]}
 ```
 
 ### `POST /api/connections/`
@@ -310,8 +311,8 @@ A pending request, sent or received.
 |---|---|---|
 | `phone_number` | string | Required. See [Phone numbers](#phone-numbers). |
 
-`201` with the new [Request](#request). Its `user` carries the other user's name, so the
-caller learns whose number they typed. `200` with the [Connection](#connection) when the
+`201` with the new [Request](#request), a sent one: its `user` is the phone number only,
+so sending and cancelling a request does not reveal whose number it is. `200` with the [Connection](#connection) when the
 other user's request to the caller was pending: sending accepts it.
 
 `400` errors are keyed by `phone_number`:
@@ -336,7 +337,9 @@ other user's request to the caller was pending: sending accepts it.
 The three `POST /api/connections/{id}/` actions take no body. `accept` returns `200` with
 the [Connection](#connection). `decline`, `cancel` and `DELETE` return `204` with no body.
 
-Accepting, declining or cancelling an accepted connection is a `409`
+Accepting an accepted connection is a `200` with the [Connection](#connection), the same
+as a first accept. The user who sent a request cannot accept it (`403`). Declining or
+cancelling an accepted connection is a `409`
 `{"detail": "This is not a pending request."}`. Removing a pending request is a `409`
 `{"detail": "You are not connected."}`. A connection that is gone is a `404`
 `{"detail": "Connection not found."}`.

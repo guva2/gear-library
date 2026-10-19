@@ -42,11 +42,19 @@ def connected(connection, user):
     }
 
 
-def requested(connection, user):
+def received(connection, user):
     return {
         "id": connection.id,
         "status": "pending",
         "user": {"first_name": user.first_name, "last_name": user.last_name},
+    }
+
+
+def sent(connection, user):
+    return {
+        "id": connection.id,
+        "status": "pending",
+        "user": {"phone_number": user.phone_number},
     }
 
 
@@ -120,22 +128,27 @@ class TestLists:
 
         assert response.json() == [connected(people["with_bob"], people["ada"])]
 
-    def test_requests_show_only_the_other_users_name(self, people):
+    def test_received_requests_show_the_name_and_sent_requests_the_number(self, people):
         response = client_for(people["ada"]).get(REQUESTS_URL)
 
         assert response.status_code == 200
         assert response.json() == {
-            "received": [requested(people["from_cy"], people["cy"])],
-            "sent": [requested(people["to_dee"], people["dee"])],
+            "received": [received(people["from_cy"], people["cy"])],
+            "sent": [sent(people["to_dee"], people["dee"])],
         }
-        for user in [people["cy"], people["dee"]]:
-            assert user.phone_number not in str(response.json())
+        assert people["cy"].phone_number not in str(response.json())
+
+    def test_a_sent_request_carries_no_name_or_user_id(self, people):
+        response = client_for(people["ada"]).get(REQUESTS_URL)
+
+        (request,) = response.json()["sent"]
+        assert request["user"] == {"phone_number": people["dee"].phone_number}
 
     def test_the_other_side_sees_the_request_the_other_way(self, people):
         response = client_for(people["dee"]).get(REQUESTS_URL)
 
         assert response.json() == {
-            "received": [requested(people["to_dee"], people["ada"])],
+            "received": [received(people["to_dee"], people["ada"])],
             "sent": [],
         }
 
@@ -165,7 +178,8 @@ class TestRequest:
 
         assert response.status_code == 201
         row = Connection.objects.get(requested_by=people["stan"])
-        assert response.json() == requested(row, people["ada"])
+        assert response.json() == sent(row, people["ada"])
+        assert response.json()["user"] == {"phone_number": people["ada"].phone_number}
 
     def test_a_request_to_someone_whose_request_is_pending_connects_at_once(self, people):
         response = self.send(people["ada"], people["cy"].phone_number)
@@ -253,14 +267,23 @@ class TestActions:
         assert response.status_code == 403
         assert Connection.objects.get(pk=people[connection].pk).status == "pending"
 
-    @pytest.mark.parametrize(
-        "by, action", [("ada", "accept"), ("ada", "decline"), ("bob", "cancel")]
-    )
+    @pytest.mark.parametrize("by, action", [("ada", "decline"), ("bob", "cancel")])
     def test_answering_an_accepted_connection_conflicts(self, people, by, action):
         response = self.post(people[by], people["with_bob"], action)
 
         assert response.status_code == 409
         assert response.json() == {"detail": "This is not a pending request."}
+
+    def test_accepting_an_accepted_connection_returns_it(self, people):
+        response = self.post(people["ada"], people["with_bob"], "accept")
+
+        assert response.status_code == 200
+        assert response.json() == connected(people["with_bob"], people["bob"])
+
+    def test_the_requester_cannot_accept_an_accepted_connection(self, people):
+        response = self.post(people["bob"], people["with_bob"], "accept")
+
+        assert response.status_code == 403
 
     def test_removing_a_pending_request_conflicts(self, people):
         response = client_for(people["ada"]).delete(f"{CONNECTIONS_URL}{people['to_dee'].id}/")

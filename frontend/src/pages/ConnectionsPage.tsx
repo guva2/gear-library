@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
-import type { Connection, ConnectionRequest, ConnectionRequests } from "../connections";
+import type { Connection, ConnectionRequests, ReceivedRequest, SentRequest } from "../connections";
 import { Confirmation, Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
 import { fullName, getJson } from "../inventories";
 import { useLoad } from "../load";
@@ -35,13 +35,13 @@ export default function ConnectionsPage() {
     }
   }
 
-  const answer = (action: "accept" | "decline" | "cancel") => (request: ConnectionRequest) =>
+  const answer = (action: "accept" | "decline" | "cancel") => (request: { id: number }) =>
     act(`/api/connections/${request.id}/${action}/`, "POST");
-  const receivedActions: RequestAction[] = [
+  const receivedActions: RequestAction<ReceivedRequest>[] = [
     { label: "Accept", name: "Accept request from", run: answer("accept") },
     { label: "Decline", name: "Decline request from", run: answer("decline") },
   ];
-  const sentActions: RequestAction[] = [
+  const sentActions: RequestAction<SentRequest>[] = [
     { label: "Cancel", name: "Cancel request to", run: answer("cancel") },
   ];
 
@@ -65,16 +65,18 @@ export default function ConnectionsPage() {
             empty="No requests received."
             requests={page.data.received}
             actions={receivedActions}
+            describe={(request) => fullName(request.user)}
           />
           <RequestList
             title="Requests sent"
             empty="No requests sent."
             requests={page.data.sent}
             actions={sentActions}
+            describe={(request) => formatPhoneNumber(request.user.phone_number)}
           />
         </>
       )}
-      <SendRequest reload={reload} />
+      <SendRequest reload={reload} onStart={() => setErrors({})} />
     </>
   );
 }
@@ -127,21 +129,29 @@ function ConnectionList({ connections, onRemove }: ConnectionListProps) {
   );
 }
 
-interface RequestAction {
+interface RequestAction<R> {
   label: string;
-  /** The accessible name before the other user's name, such as "Accept request from". */
+  /** The accessible name before the other user's name or number, such as "Accept request from". */
   name: string;
-  run: (request: ConnectionRequest) => void;
+  run: (request: R) => void;
 }
 
-interface RequestListProps {
+interface RequestListProps<R extends { id: number }> {
   title: string;
   empty: string;
-  requests: ConnectionRequest[];
-  actions: RequestAction[];
+  requests: R[];
+  actions: RequestAction<R>[];
+  /** Who the request is from or to: a name for a received request, a number for a sent one. */
+  describe: (request: R) => string;
 }
 
-function RequestList({ title, empty, requests, actions }: RequestListProps) {
+function RequestList<R extends { id: number }>({
+  title,
+  empty,
+  requests,
+  actions,
+  describe,
+}: RequestListProps<R>) {
   const id = title.toLowerCase().replaceAll(" ", "-");
   return (
     <section aria-labelledby={id}>
@@ -152,13 +162,13 @@ function RequestList({ title, empty, requests, actions }: RequestListProps) {
         <ul>
           {requests.map((request) => (
             <li key={request.id}>
-              <span>{fullName(request.user)}</span>
+              <span>{describe(request)}</span>
               {actions.map((action) => (
                 <span key={action.label}>
                   {" "}
                   <button
                     type="button"
-                    aria-label={`${action.name} ${fullName(request.user)}`}
+                    aria-label={`${action.name} ${describe(request)}`}
                     onClick={() => action.run(request)}
                   >
                     {action.label}
@@ -173,7 +183,7 @@ function RequestList({ title, empty, requests, actions }: RequestListProps) {
   );
 }
 
-function SendRequest({ reload }: { reload: () => void }) {
+function SendRequest({ reload, onStart }: { reload: () => void; onStart: () => void }) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [sent, setSent] = useState<string | null>(null);
   const formRef = useFocusFirstInvalid(errors);
@@ -182,6 +192,7 @@ function SendRequest({ reload }: { reload: () => void }) {
     event.preventDefault();
     const form = event.currentTarget;
     setSent(null);
+    onStart();
     try {
       const response = await apiFetch("/api/connections/", {
         method: "POST",
@@ -191,12 +202,12 @@ function SendRequest({ reload }: { reload: () => void }) {
         setErrors(await readErrors(response, ["phone_number"]));
         return;
       }
-      const result = (await response.json()) as Connection | ConnectionRequest;
+      const result = (await response.json()) as Connection | SentRequest;
       setErrors({});
       setSent(
         result.status === "accepted"
           ? `You are now connected with ${fullName(result.user)}.`
-          : `Request sent to ${fullName(result.user)}.`,
+          : `Request sent to ${formatPhoneNumber(result.user.phone_number)}.`,
       );
       form.reset();
       reload();

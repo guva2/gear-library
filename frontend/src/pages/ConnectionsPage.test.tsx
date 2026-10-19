@@ -13,7 +13,7 @@ const WITH_BOB = {
   user: { id: 2, first_name: "Bob", last_name: "Stone", phone_number: "5551230002" },
 };
 const FROM_CY = { id: 11, status: "pending", user: { first_name: "Cy", last_name: "Young" } };
-const TO_DEE = { id: 12, status: "pending", user: { first_name: "Dee", last_name: "Ford" } };
+const TO_DEE = { id: 12, status: "pending", user: { phone_number: "5551230004" } };
 
 function signedIn(routes: Routes = {}) {
   return fakeBackend({ "GET /api/auth/me/": json(200, ADA), ...routes });
@@ -53,16 +53,16 @@ function items(name: string) {
 }
 
 describe("my connections", () => {
-  it("shows connections with their phone number and requests by name only", async () => {
+  it("shows connections by name and number, received requests by name, sent requests by number", async () => {
     liveBackend(() => ({}));
 
     await open();
 
     expect(items("Connections")).toEqual(["Bob Stone, (555) 123-0002"]);
     expect(items("Requests received")).toEqual(["Cy Young"]);
-    expect(items("Requests sent")).toEqual(["Dee Ford"]);
-    const requests = [region("Requests received"), region("Requests sent")];
-    for (const section of requests) expect(section.textContent).not.toMatch(PHONE_NUMBER);
+    expect(items("Requests sent")).toEqual(["(555) 123-0004"]);
+    expect(region("Requests received").textContent).not.toMatch(PHONE_NUMBER);
+    expect(region("Requests sent").textContent).not.toMatch(/Dee|Ford/);
   });
 
   it("says so when there are no connections or requests", async () => {
@@ -195,7 +195,7 @@ describe("answering requests", () => {
     }));
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request to Dee Ford" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request to (555) 123-0004" }));
 
     expect(await screen.findByText("No requests sent.")).toBeInTheDocument();
     expect(backend.requests("POST /api/connections/12/cancel/")).toHaveLength(1);
@@ -212,11 +212,31 @@ describe("answering requests", () => {
     }));
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request to Dee Ford" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request to (555) 123-0004" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("This is not a pending request.");
     await waitFor(() => expect(items("Requests sent")).toEqual([]));
     expect(items("Connections")).toContain("Dee Ford, (555) 123-0002");
+  });
+
+  it("clears a refusal when a request is sent", async () => {
+    const MIA = { id: 13, status: "pending", user: { phone_number: "5551230007" } };
+    liveBackend((state) => ({
+      "POST /api/connections/11/decline/": json(409, { detail: "This is not a pending request." }),
+      "POST /api/connections/": () => {
+        state.sent = [TO_DEE, MIA];
+        return json(201, MIA)({});
+      },
+    }));
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Decline request from Cy Young" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This is not a pending request.");
+
+    fillIn("Phone number", "5551230007");
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("says when the backend cannot be reached", async () => {
@@ -239,8 +259,8 @@ describe("sending a request", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send request" }));
   }
 
-  it("sends the number, says who it went to and lists the request", async () => {
-    const MIA = { id: 13, status: "pending", user: { first_name: "Mia", last_name: "Lee" } };
+  it("sends the number, repeats it back and lists the request", async () => {
+    const MIA = { id: 13, status: "pending", user: { phone_number: "5551230007" } };
     const backend = liveBackend((state) => ({
       "POST /api/connections/": () => {
         state.sent = [TO_DEE, MIA];
@@ -251,8 +271,8 @@ describe("sending a request", () => {
 
     await send("(555) 123-0007");
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Request sent to Mia Lee.");
-    await waitFor(() => expect(items("Requests sent")).toEqual(["Dee Ford", "Mia Lee"]));
+    expect(await screen.findByRole("status")).toHaveTextContent("Request sent to (555) 123-0007.");
+    await waitFor(() => expect(items("Requests sent")).toEqual(["(555) 123-0004", "(555) 123-0007"]));
     expect(backend.requests("POST /api/connections/")).toEqual([
       { phone_number: "(555) 123-0007" },
     ]);

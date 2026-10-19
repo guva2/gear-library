@@ -9,7 +9,8 @@ on the pair refuses it when the pair already has a row. The request then accepts
 other user's pending request with one conditional update, or gets `Conflict`. Accepting is
 one conditional update from pending, and declining, cancelling and removing are each one
 conditional delete on the status the action needs. When that matches no row, a row that
-is gone gets `NotFound` and one in the other status gets `Conflict`.
+is gone gets `NotFound` and one in the other status gets `Conflict`, except that accepting
+an accepted connection returns it.
 """
 
 from django.contrib.auth import get_user_model
@@ -113,13 +114,15 @@ def _delete_if(found, status, wrong_status):
 
 
 def accept(user, connection_id):
-    """Accepts a pending request the caller received and returns the connection."""
+    """Accepts a pending request the caller received and returns the connection. Accepting
+    a connection that is already accepted returns it unchanged."""
     found = _connection_for(user, connection_id)
     _refuse_requester(found, user)
     if not Connection.objects.pending().filter(pk=found.pk).update(
         status=ConnectionStatus.ACCEPTED
     ):
-        _gone_or_conflict(found.pk, NOT_PENDING)
+        if not Connection.objects.accepted().filter(pk=found.pk).exists():
+            _gone_or_conflict(found.pk, NOT_PENDING)
     found.status = ConnectionStatus.ACCEPTED
     return found
 

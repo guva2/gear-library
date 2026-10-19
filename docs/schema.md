@@ -179,7 +179,8 @@ These rules span tables, so the database cannot check them alone.
 - Accepting a request is one conditional update where `status = 'pending'`. Declining and
   cancelling are each one conditional delete where `status = 'pending'`, and removing is
   one where `status = 'accepted'`. If no row matches, a row that is gone gets `404` and a
-  row in the other status gets `409`.
+  row in the other status gets `409`, except that accepting a row that is already
+  accepted returns it.
 - These operations first lock the inventory's row (`select_for_update`): every change to
   its listings, and every borrow request, approve, decline, cancel or mark returned
   through it. An operation that touches several inventories, such as deleting an item
@@ -233,8 +234,10 @@ These rules span tables, so the database cannot check them alone.
   Either user removes an accepted connection.
 - Only the two users of a connection see it. Anyone else gets `404`, whether it is
   pending, accepted or gone.
-- Connected users see each other's id, first and last name, and phone number. A pending
-  request, sent or received, shows the other user's first and last name only.
+- Connected users see each other's id, first and last name, and phone number. A received
+  pending request shows the requester's first and last name only. A sent pending request
+  shows the other user's phone number only, so cancelling a request does not reveal a name.
+- Accepting an accepted connection returns it, like accepting an invite.
 
 ### Listings
 

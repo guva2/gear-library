@@ -175,7 +175,7 @@ class TestAnswer:
 
     @pytest.mark.parametrize(
         "action, by",
-        [(connections.accept, "bob"), (connections.decline, "bob"), (connections.cancel, "ada")],
+        [(connections.decline, "bob"), (connections.cancel, "ada")],
     )
     def test_answering_an_accepted_connection_conflicts(self, ada, bob, request_, action, by):
         connections.accept(bob, request_.id)
@@ -183,6 +183,14 @@ class TestAnswer:
         with pytest.raises(Conflict) as excinfo:
             action(ada if by == "ada" else bob, request_.id)
         assert excinfo.value.detail == "This is not a pending request."
+        assert status_of(request_.pk) == "accepted"
+
+    def test_accepting_an_accepted_connection_returns_it(self, bob, request_):
+        connections.accept(bob, request_.id)
+
+        again = connections.accept(bob, request_.id)
+
+        assert again.pk == request_.pk
         assert status_of(request_.pk) == "accepted"
 
     def test_removing_a_pending_request_conflicts(self, ada, request_):
@@ -241,7 +249,17 @@ class TestAnswer:
         with pytest.raises(NotFound):
             action(ada if by == "ada" else bob, request_.id)
 
-    @pytest.mark.parametrize("action, by", ACTIONS[:3])
+    def test_a_request_accepted_after_it_was_read_is_returned_by_accept(
+        self, bob, request_, monkeypatch
+    ):
+        self.hook_after_reading(
+            monkeypatch,
+            lambda found: Connection.objects.filter(pk=found.pk).update(status="accepted"),
+        )
+
+        assert connections.accept(bob, request_.id).pk == request_.pk
+
+    @pytest.mark.parametrize("action, by", ACTIONS[1:3])
     def test_a_request_accepted_after_it_was_read_conflicts(
         self, ada, bob, request_, monkeypatch, action, by
     ):

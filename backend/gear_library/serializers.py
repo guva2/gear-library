@@ -125,7 +125,21 @@ class ConnectionSerializer(_ConnectionSerializer):
     person_serializer = UserSerializer
 
 
-class ConnectionRequestSerializer(_ConnectionSerializer):
-    """A pending request, sent or received. The other user appears by name only."""
+class ReceivedRequestSerializer(_ConnectionSerializer):
+    """A pending request the caller received. The requester appears by name only."""
 
     person_serializer = PersonNameSerializer
+
+
+class PhoneOnlySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["phone_number"]
+        read_only_fields = fields
+
+
+class SentRequestSerializer(_ConnectionSerializer):
+    """A pending request the caller sent. The other user appears by phone number only,
+    so sending and cancelling a request does not reveal whose number it is."""
+
+    person_serializer = PhoneOnlySerializer
