@@ -217,6 +217,6 @@ describe("register page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     await screen.findByText("This field may not be blank.");
-    expect(screen.getByLabelText("First name")).toHaveFocus();
+    await waitFor(() => expect(screen.getByLabelText("First name")).toHaveFocus());
   });
 });

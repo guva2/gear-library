@@ -361,7 +361,7 @@ class TestAnswerInvite:
 
         with pytest.raises(Conflict) as excinfo:
             action(invitee if by == "invitee" else owner, invite.id)
-        assert excinfo.value.detail == "This invite is no longer pending."
+        assert excinfo.value.detail == "This is not a pending invite."
         assert status_of(invite.pk) == "active"
 
     @pytest.mark.parametrize(

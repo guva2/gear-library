@@ -42,7 +42,7 @@ ROLE_REQUIRED = {
 }
 LAST_OWNER = "An inventory must keep at least one owner."
 NO_SUCH_USER = "No user has this phone number."
-NOT_PENDING = "This invite is no longer pending."
+NOT_PENDING = "This is not a pending invite."
 ALREADY_IN = "This user is already a member or has a pending invite."
 
 

@@ -442,7 +442,7 @@ class TestMyInvites:
         response = self.answer(people[by], invite, action)
 
         assert response.status_code == 409
-        assert response.json() == {"detail": "This invite is no longer pending."}
+        assert response.json() == {"detail": "This is not a pending invite."}
 
     def test_answering_a_declined_invite_is_not_found(self, people, invite):
         self.answer(people["pending"], invite, "decline")

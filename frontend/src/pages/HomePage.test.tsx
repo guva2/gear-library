@@ -82,7 +82,7 @@ describe("my inventories", () => {
 
     const name = screen.getByLabelText("Inventory name");
     await waitFor(() => expect(name).toHaveAccessibleDescription("This field may not be blank."));
-    expect(name).toHaveFocus();
+    await waitFor(() => expect(name).toHaveFocus());
   });
 });
 
