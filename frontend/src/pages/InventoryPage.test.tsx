@@ -216,19 +216,26 @@ describe("as an admin", () => {
     expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull();
   });
 
-  it("shows a conflict for the whole invite form", async () => {
+  it("names the conflicting connection in the section alert after it leaves the picker", async () => {
+    let connections = CONNECTIONS;
     asRole("admin", {
-      [`POST ${URL}invites/`]: json(409, {
-        detail: "This user is already a member or has a pending invite.",
-      }),
+      "GET /api/connections/": () => json(200, connections)({}),
+      [`POST ${URL}invites/`]: () => {
+        connections = CONNECTIONS.filter(({ user }) => user.id !== 5);
+        return json(409, {
+          detail: "This user is already a member or has a pending invite.",
+        })({});
+      },
     });
     await open();
+    expect(screen.getByRole("combobox", { name: "Connection" })).toHaveDisplayValue(/Dee Park/);
 
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
     expect(await within(region("Pending invites")).findByRole("alert")).toHaveTextContent(
-      "This user is already a member or has a pending invite.",
+      "Dee Park was not invited. This user is already a member or has a pending invite.",
     );
+    expect(screen.getByRole("combobox", { name: "Connection" })).toHaveDisplayValue(/Eve Moss/);
   });
 
   it("explains a refused invite after losing the admin role in another session", async () => {

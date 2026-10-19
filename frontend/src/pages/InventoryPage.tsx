@@ -297,11 +297,12 @@ function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesPr
     // A refused person leaves the picker on reload, so the message names them and
     // sits at section level instead of beside whoever the select falls back to.
     const refused = invitable.find((user) => user.id === userId);
+    const reasons = [...(failed?.user_id ?? []), ...(failed?.form ?? [])];
     setErrors(
-      failed?.user_id
+      reasons.length > 0
         ? {
             form: [
-              `${refused ? fullName(refused) : "That person"} was not invited. ${failed.user_id.join(" ")}`,
+              `${refused ? fullName(refused) : "That person"} was not invited. ${reasons.join(" ")}`,
             ],
           }
         : (failed ?? {}),

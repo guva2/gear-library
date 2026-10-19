@@ -89,8 +89,9 @@ docker compose run --rm backend python manage.py seed_demo
 creates three demo users, two inventories and the users' connections. Running it again
 changes nothing: users that already exist are left as they are, a demo inventory is skipped
 when its owner below is already in an inventory with that name, and a demo connection is
-skipped when the two users already have a connection or a request, so a database seeded
-before connections changed keeps its old ones (delete them and run it again to reset). Log in at <http://localhost:5173> with any
+skipped when the two users already have a connection or a request. A database seeded by an
+older version of this command therefore keeps its old connections; to reset them, delete the
+demo users' connections and run `seed_demo` again. Log in at <http://localhost:5173> with any
 of them, using the password `gear-library-demo`:
 
 | Phone number | Name | Climbing Club | Camping Crew |
