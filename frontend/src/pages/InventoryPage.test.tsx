@@ -237,6 +237,80 @@ describe("as an owner", () => {
     expect(screen.getByRole("combobox", { name: "Role for Ada Lovelace" })).toHaveValue("owner");
   });
 
+  it("clears the last owner's refusal once a later change succeeds", async () => {
+    asRole("owner", {
+      [`PATCH ${URL}members/1/`]: json(409, {
+        detail: "An inventory must keep at least one owner.",
+      }),
+      [`PATCH ${URL}`]: json(200, { id: 7, name: "Bouldering", role: "owner" }),
+    });
+    await open();
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Ada Lovelace" }), {
+      target: { value: "member" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Yes, change my role" }));
+    await screen.findByText("An inventory must keep at least one owner.");
+
+    fillIn("New name", "Bouldering");
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("An inventory must keep at least one owner.")).toBeNull(),
+    );
+  });
+
+  it("clears a permission refusal once a later change succeeds", async () => {
+    asRole("owner", {
+      [`PATCH ${URL}members/3/`]: json(403, { detail: "You do not have permission." }),
+      [`PATCH ${URL}`]: json(200, { id: 7, name: "Bouldering", role: "owner" }),
+    });
+    await open();
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Mia Lee" }), {
+      target: { value: "admin" },
+    });
+    await screen.findByText("You do not have permission.");
+
+    fillIn("New name", "Bouldering");
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    await waitFor(() => expect(screen.queryByText("You do not have permission.")).toBeNull());
+  });
+
+  it("drops the own-role prompt when the user stops being an owner", async () => {
+    let role: Role = "owner";
+    asRole("owner", {
+      [`GET ${URL}`]: () => json(200, { id: 7, name: "Climbing Club", role })({}),
+      [`GET ${URL}members/`]: () => json(200, members(role))({}),
+      [`PATCH ${URL}members/3/`]: () => {
+        role = "admin";
+        return json(403, { detail: "You do not have permission." })({});
+      },
+    });
+    await open();
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Ada Lovelace" }), {
+      target: { value: "member" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Mia Lee" }), {
+      target: { value: "admin" },
+    });
+
+    expect(await screen.findByText("Your role: admin")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Yes, change my role" })).toBeNull();
+  });
+
+  it("moves focus to the own-role question and the delete question", async () => {
+    asRole("owner");
+    await open();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Ada Lovelace" }), {
+      target: { value: "member" },
+    });
+    expect(screen.getByText(/Change your role to member\?/)).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete inventory" }));
+    expect(screen.getByText(/Delete Climbing Club\?/)).toHaveFocus();
+  });
+
   it("changes their own role only after confirming", async () => {
     const backend = asRole("owner", {
       [`PATCH ${URL}members/1/`]: json(200, { ...ADA, role: "admin" }),

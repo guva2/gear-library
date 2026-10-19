@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth } from "../auth";
@@ -81,6 +81,7 @@ function InventoryView({ base }: { base: string }) {
    */
   const send: Send = async (path, method, { body, fields = [] } = {}) => {
     setRefusal({});
+    setErrors({});
     try {
       const response = await apiFetch(path, { method, body });
       if (response.ok) return null;
@@ -237,24 +238,42 @@ function MemberTable({ members, ownerId, onSetRole, onRemove }: MemberTableProps
           ))}
         </tbody>
       </table>
-      {ownRole && (
-        <p>
-          {`Change your role to ${ownRole.role}? You will no longer be an owner.`}{" "}
-          <button
-            type="button"
-            onClick={() => {
-              onSetRole(ownRole.member, ownRole.role);
-              setOwnRole(null);
-            }}
-          >
-            Yes, change my role
-          </button>{" "}
-          <button type="button" onClick={() => setOwnRole(null)}>
-            Cancel
-          </button>
-        </p>
+      {controls && ownRole && (
+        <Confirmation
+          message={`Change your role to ${ownRole.role}? You will no longer be an owner.`}
+          confirm="Yes, change my role"
+          onConfirm={() => {
+            onSetRole(ownRole.member, ownRole.role);
+            setOwnRole(null);
+          }}
+          onCancel={() => setOwnRole(null)}
+        />
       )}
     </section>
+  );
+}
+
+interface ConfirmationProps {
+  message: ReactNode;
+  confirm: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/** Takes focus when it appears, so a screen reader reads the question. */
+function Confirmation({ message, confirm, onConfirm, onCancel }: ConfirmationProps) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => ref.current?.focus(), []);
+  return (
+    <p ref={ref} tabIndex={-1}>
+      {message}{" "}
+      <button type="button" onClick={onConfirm}>
+        {confirm}
+      </button>{" "}
+      <button type="button" onClick={onCancel}>
+        Cancel
+      </button>
+    </p>
   );
 }
 
@@ -355,15 +374,12 @@ function Manage({ name, send, base, reload, onDelete }: ManageProps) {
         <button type="submit">Rename</button>
       </form>
       {confirming ? (
-        <p>
-          {`Delete ${name}? This cannot be undone.`}{" "}
-          <button type="button" onClick={onDelete}>
-            Yes, delete
-          </button>{" "}
-          <button type="button" onClick={() => setConfirming(false)}>
-            Cancel
-          </button>
-        </p>
+        <Confirmation
+          message={`Delete ${name}? This cannot be undone.`}
+          confirm="Yes, delete"
+          onConfirm={onDelete}
+          onCancel={() => setConfirming(false)}
+        />
       ) : (
         <p>
           <button type="button" onClick={() => setConfirming(true)}>
