@@ -1,4 +1,6 @@
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from gear_library.models import Item, Membership
@@ -219,6 +221,18 @@ class TestOwnerMarksReturned:
 
         assert response.status_code == 204
         assert loan_of(people["rope"]) == ("available", None, None)
+
+    def test_marking_returned_reads_no_listing(self, people):
+        set_loan(people["rope"], "on_loan", people["mia"], None)
+        client = client_for(people["adam"])
+
+        with CaptureQueriesContext(connection) as captured:
+            client.post(
+                self.url(people["rope"]), {"borrower_id": people["mia"].id}, format="json"
+            )
+
+        sent = [q["sql"] for q in captured.captured_queries]
+        assert not any('"gear_library_inventoryitem"' in sql for sql in sent), sent
 
     @pytest.mark.parametrize("who", ["mia", "olive"])
     def test_anyone_else_is_not_found_before_the_body_is_read(self, people, who):

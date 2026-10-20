@@ -5,13 +5,12 @@ reads memberships through `Membership.objects.active()`, so a pending member is 
 non-member everywhere outside the invite actions.
 
 The functions that take `actor`, the caller's membership, run with the inventory row
-locked by `lock_inventory`, taken before the caller's membership was read. Changes to one
-inventory therefore run one at a time, and each sees the memberships and owners as they
-are. Leaving, being removed and taking the `member` role also delete the user's listings
-in the inventory and cancel the pending requests for those items; leaving and being
-removed also cancel the user's own pending requests made through the inventory. Deleting
-cancels the pending requests made through the inventory, then deletes its memberships and
-the row.
+locked by `lock_inventory`. Changes to one inventory therefore run one at a time, and each
+sees the memberships and owners as they are. Leaving, being removed and taking the
+`member` role also delete the user's listings in the inventory and cancel the pending
+requests for those items; leaving and being removed also cancel the user's own pending
+requests made through the inventory. Deleting cancels the pending requests made through
+the inventory, then deletes its memberships and the row.
 
 Inviting inserts a pending membership; the unique index on (inventory, user) refuses a
 user who is already a member or invited, with `Conflict`. Accepting, declining and
@@ -92,7 +91,6 @@ def _refuse_losing_last_owner(membership):
         raise Conflict(LAST_OWNER)
 
 
-@transaction.atomic
 def create_inventory(user, name):
     inventory = Inventory.objects.create(name=name)
     return Membership.objects.create(

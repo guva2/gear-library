@@ -17,7 +17,8 @@ def people():
     """An inventory owned by Olive, where the admin Adam lists his rope and Mia and Max are
     members."""
     olive = make_user(1, "Olive")
-    inventory = inventories.create_inventory(olive, "Climbing").inventory
+    with transaction.atomic():
+        inventory = inventories.create_inventory(olive, "Climbing").inventory
     adam = join(inventory, "admin", 2)
     mia = join(inventory, "member", 3)
     max_ = join(inventory, "member", 4)

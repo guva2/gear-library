@@ -221,6 +221,11 @@ class TestCommittedRaces:
                 thread.join(10)
         return outcomes
 
+    def requested(self, requester, other):
+        """`request_connection` in a transaction of its own, as a request runs it."""
+        with transaction.atomic():
+            return connections.request_connection(requester, other.phone_number)
+
     def holding(self, sql_prefix, action):
         """`action` in a transaction that stays open after its first `sql_prefix`
         statement. Returns it with its `held` and `release` events."""
@@ -258,7 +263,7 @@ class TestCommittedRaces:
         assert Connection.objects.get().status == "pending"
 
     def test_a_crossed_request_waits_for_a_cancel_and_becomes_a_new_request(self, ada, bob):
-        request = connections.request_connection(bob, ada.phone_number)
+        request = self.requested(bob, ada)
         first, held, release = self.holding(
             DELETE_CONNECTION, lambda: connections.delete_request(request)
         )
@@ -271,7 +276,7 @@ class TestCommittedRaces:
         assert (row.status, row.requested_by) == ("pending", ada)
 
     def test_a_cancel_waits_for_a_crossed_request_and_conflicts(self, ada, bob):
-        request = connections.request_connection(bob, ada.phone_number)
+        request = self.requested(bob, ada)
         first, held, release = self.holding(
             UPDATE_CONNECTION, lambda: connections.request_connection(ada, bob.phone_number)
         )
@@ -284,7 +289,7 @@ class TestCommittedRaces:
         assert Connection.objects.get().status == "accepted"
 
     def test_a_decline_waits_for_a_cancel_and_is_not_found(self, ada, bob):
-        request = connections.request_connection(ada, bob.phone_number)
+        request = self.requested(ada, bob)
         first, held, release = self.holding(
             DELETE_CONNECTION, lambda: connections.delete_request(request)
         )
@@ -297,7 +302,7 @@ class TestCommittedRaces:
         assert not Connection.objects.exists()
 
     def test_a_cancel_waits_for_an_accept_and_conflicts(self, ada, bob):
-        request = connections.request_connection(ada, bob.phone_number)
+        request = self.requested(ada, bob)
         first, held, release = self.holding(
             UPDATE_CONNECTION, lambda: connections.accept(request)
         )

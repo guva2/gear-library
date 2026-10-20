@@ -72,12 +72,11 @@ def _accept_theirs(user, other):
     """Accepts `other`'s pending request to `user` and returns it, or returns None when
     there is none."""
     pair = Connection.objects.between(user, other)
-    with transaction.atomic():
-        if not pair.pending().filter(requested_by=other).update(
-            status=ConnectionStatus.ACCEPTED
-        ):
-            return None
-        return pair.select_related("first_user", "second_user").get()
+    if not pair.pending().filter(requested_by=other).update(
+        status=ConnectionStatus.ACCEPTED
+    ):
+        return None
+    return pair.select_related("first_user", "second_user").get()
 
 
 def _gone_or_conflict(connection_id, wrong_status):

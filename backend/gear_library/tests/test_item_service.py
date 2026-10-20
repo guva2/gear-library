@@ -2,7 +2,7 @@ import threading
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import connection
+from django.db import connection, transaction
 from rest_framework.exceptions import NotFound, ValidationError
 
 from gear_library import inventories, items
@@ -229,7 +229,8 @@ class TestCommittedRaces:
 
     @pytest.fixture
     def inventory(self, owner):
-        return inventories.create_inventory(owner, "Climbing").inventory
+        with transaction.atomic():
+            return inventories.create_inventory(owner, "Climbing").inventory
 
     @pytest.fixture
     def item(self, owner):
@@ -287,7 +288,8 @@ class TestCommittedRaces:
         locked the item. The delete must not delete that listing without its inventory's
         lock, and cannot take that lock while it holds the item row."""
         list_directly(inventory, item)
-        camping = inventories.create_inventory(owner, "Camping").inventory
+        with transaction.atomic():
+            camping = inventories.create_inventory(owner, "Camping").inventory
         statements, listed_elsewhere = [], threading.Event()
 
         def list_it_first(execute, sql, params, many, context):

@@ -2,10 +2,10 @@
 
 A request is made through an inventory, its loan inventory. Requesting, approving,
 declining and marking returned through an inventory take the item's listing there, read
-with the inventory row locked by `inventories.lock_inventory`, taken before the caller's
-membership was read. Each change is then one conditional update of the item row that
-matches the state the caller saw: its loan status, its borrower and the inventory. When no
-row matches, the item changed in the meantime and the change gets `Conflict`.
+with the inventory row locked by `inventories.lock_inventory`. Each change is then one
+conditional update of the item row that matches the state the caller saw: its loan status,
+its borrower and the inventory. When no row matches, the item changed in the meantime and
+the change gets `Conflict`.
 
 Cancelling and the item owner's mark returned take no inventory lock. Each is one
 conditional update of the item row, on its borrower or on its owner. Cancelling re-checks

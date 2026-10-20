@@ -83,16 +83,6 @@ class TestCreateInventory:
         assert (membership.user, membership.role) == (owner, "owner")
         assert role_of(membership.inventory, owner) == "owner"
 
-    def test_creates_nothing_when_the_membership_insert_fails(self, owner, monkeypatch):
-        def fail(**kwargs):
-            raise RuntimeError("insert failed")
-
-        monkeypatch.setattr(Membership.objects, "create", fail)
-
-        with pytest.raises(RuntimeError):
-            inventories.create_inventory(owner, "Climbing")
-        assert not Inventory.objects.exists()
-
 
 @pytest.mark.django_db
 class TestRenameAndDelete:
@@ -459,7 +449,8 @@ class TestCommittedRaces:
 
     @pytest.fixture
     def inventory(self, owner):
-        return inventories.create_inventory(owner, "Climbing").inventory
+        with transaction.atomic():
+            return inventories.create_inventory(owner, "Climbing").inventory
 
     @pytest.fixture
     def invitee(self, owner):

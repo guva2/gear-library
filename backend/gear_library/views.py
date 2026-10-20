@@ -201,9 +201,6 @@ class InventoryScopedViewSet(ApiViewSet):
     transaction ends. The role checked therefore stays the caller's until the change
     commits. Reads take no lock.
 
-    A method the view has no handler for is answered 405 before the lock and
-    `InventoryRole`.
-
     `InventoryRole` runs before the body is read, so a non-member gets 404 and a member
     without `required_role` gets 403 whatever they send. Actions read the caller's
     membership as `request.membership`.
@@ -218,14 +215,17 @@ class InventoryScopedViewSet(ApiViewSet):
         return Role.MEMBER
 
     def perform_authentication(self, request):
-        # `initial()` calls this first, before the permission checks. A method the view
-        # does not serve is answered 405 before anything locks or reads membership. The
-        # browsable API and OPTIONS check permissions on copies of the request without
-        # calling it, so they take no lock.
+        # `initial()` calls this first, before the permission checks. A logged-out caller
+        # is left to `IsAuthenticated`. For anyone else, a method the view does not serve
+        # is answered 405 before anything locks or reads membership. The browsable API
+        # and OPTIONS check permissions on copies of the request without calling it, so
+        # they take no lock.
+        super().perform_authentication(request)
+        if not request.user.is_authenticated:
+            return
         if not hasattr(self, request.method.lower()):
             raise MethodNotAllowed(request.method)
-        super().perform_authentication(request)
-        if request.method not in SAFE_METHODS and request.user.is_authenticated:
+        if request.method not in SAFE_METHODS:
             inventories.lock_inventory(self.inventory_id())
 
 
@@ -510,9 +510,10 @@ class ItemViewSet(ApiViewSet):
 
     @action(detail=True, methods=["post"], url_path="return")
     def mark_returned(self, request, **kwargs):
-        item = self.get_object()
+        if not Item.objects.filter(owner=request.user, pk=self.kwargs["id"]).exists():
+            raise NotFound(self.not_found)
         borrower_id = _validated(BorrowerIdSerializer, request)["borrower_id"]
-        loans.owner_mark_returned(request.user, item.id, borrower_id)
+        loans.owner_mark_returned(request.user, self.kwargs["id"], borrower_id)
         return _no_content()
 
 

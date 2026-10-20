@@ -4,6 +4,7 @@ import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.permissions import SAFE_METHODS
+from rest_framework.test import APIClient
 
 from gear_library import urls
 from gear_library.models import Connection, Item, Membership, ordered_pair
@@ -128,11 +129,11 @@ def test_every_change_under_an_inventory_locks_it_before_any_other_query(path, m
     assert sent and locks(sent[0], inventory), sent[:1]
 
 
-CHANGING_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+CANDIDATE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 UNSERVED = sorted(
     (path, method)
     for path in {path for path, _ in SCOPED}
-    for method in CHANGING_METHODS
+    for method in CANDIDATE_METHODS
     if (path, method) not in ROUTES
 )
 
@@ -154,6 +155,20 @@ def test_a_method_the_route_does_not_serve_is_405_and_takes_no_lock(path, method
 
     assert responses[0].status_code == 405
     assert not any("FOR UPDATE" in sql for sql in sent)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("path, method", UNSERVED)
+def test_a_logged_out_caller_is_forbidden_on_a_method_the_route_does_not_serve(
+    path, method
+):
+    owner = make_user(1)
+    inventory = make_inventory("Climbing", [(owner, "owner")])
+
+    send = getattr(APIClient(), method.lower())
+    response = send(scoped_url(path, inventory), {}, format="json")
+
+    assert response.status_code == 403
 
 
 @pytest.mark.django_db

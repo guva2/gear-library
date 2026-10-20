@@ -118,6 +118,20 @@ class TestInventories:
         assert response.json() == {"id": inventory.id, "name": "Camping", "role": "owner"}
         assert Membership.objects.get(inventory=inventory).user == people["stranger"]
 
+    def test_creating_makes_nothing_when_the_membership_insert_fails(
+        self, people, monkeypatch
+    ):
+        def fail(**kwargs):
+            raise RuntimeError("insert failed")
+
+        monkeypatch.setattr(Membership.objects, "create", fail)
+
+        with pytest.raises(RuntimeError):
+            client_for(people["stranger"]).post(
+                INVENTORIES_URL, {"name": "Camping"}, format="json"
+            )
+        assert not Inventory.objects.filter(name="Camping").exists()
+
     @pytest.mark.parametrize("name", ["", "   ", "x" * 33, None])
     def test_rejects_a_blank_or_long_name(self, people, name):
         response = client_for(people["owner"]).post(
