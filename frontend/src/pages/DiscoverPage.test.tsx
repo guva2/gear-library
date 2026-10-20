@@ -246,23 +246,78 @@ describe("discover as an admin or owner", () => {
 
     fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
 
-    expect(await within(card("Rope")).findByText("In use by you")).toBeInTheDocument();
     expect(within(card("Rope")).queryByLabelText("Request through")).toBeNull();
+    expect(within(card("Rope")).queryByLabelText("Mark unavailable through")).toBeNull();
+    expect(await within(card("Rope")).findByText("In use by you")).toBeInTheDocument();
     expect(backend.requests("POST /api/inventories/7/items/20/borrow/")).toEqual([undefined]);
   });
 
-  it("uses the first of several inventories where the caller is an admin or owner", async () => {
+  it("asks which inventory to mark unavailable through when the caller is an admin in several", async () => {
+    const HIKING = { id: 9, name: "Hiking Group", role: "member" } as const;
     const backend = liveBackend((state) => {
-      state.items = [{ ...ROPE, inventories: [OWNER_OF_CAMPING, ADMIN_OF_CLIMBING] }];
-      return { "POST /api/inventories/8/items/20/borrow/": empty(204) };
+      state.items = [{ ...ROPE, inventories: [HIKING, OWNER_OF_CAMPING, ADMIN_OF_CLIMBING] }];
+      return { "POST /api/inventories/7/items/20/borrow/": empty(204) };
     });
     await open();
 
     fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
+    const through = within(card("Rope")).getByLabelText("Mark unavailable through");
+    expect(
+      within(through)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Camping Crew", "Climbing Club"]);
+    expect(through).toHaveValue("8");
+    await waitFor(() => expect(through).toHaveFocus());
+
+    fireEvent.change(through, { target: { value: "7" } });
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark unavailable" }));
 
     await waitFor(() =>
-      expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(1),
+      expect(backend.requests("POST /api/inventories/7/items/20/borrow/")).toEqual([undefined]),
     );
+    expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(0);
+  });
+
+  it("moves focus to the card heading after marking unavailable from the inventory choice", async () => {
+    liveBackend((state) => {
+      state.items = [{ ...ROPE, inventories: [OWNER_OF_CAMPING, ADMIN_OF_CLIMBING] }];
+      return {
+        "POST /api/inventories/8/items/20/borrow/": () => {
+          state.items = [{ ...state.items[0], loan_status: "on_loan", borrowed_by_me: true }];
+          state.borrowed = [{ ...HELD, id: 20, name: "Rope", loan_inventory: CAMPING }];
+          return empty(204)({});
+        },
+      };
+    });
+    await open();
+
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark unavailable" }));
+
+    expect(await within(card("Rope")).findByText("In use by you")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(card("Rope")).getByRole("heading", { name: "Rope" })).toHaveFocus(),
+    );
+  });
+
+  it("closes the mark-unavailable choice on Cancel without borrowing", async () => {
+    const backend = liveBackend((state) => {
+      state.items = [{ ...ROPE, inventories: [OWNER_OF_CAMPING, ADMIN_OF_CLIMBING] }];
+      return {};
+    });
+    await open();
+
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Cancel" }));
+
+    expect(within(card("Rope")).queryByLabelText("Mark unavailable through")).toBeNull();
+    await waitFor(() =>
+      expect(
+        within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }),
+      ).toHaveFocus(),
+    );
+    expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(0);
   });
 
   it("marks an item it holds available through its loan inventory", async () => {

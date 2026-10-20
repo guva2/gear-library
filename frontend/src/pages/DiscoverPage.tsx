@@ -93,9 +93,9 @@ function ItemCard({ item, actedOn, onRequest, onMarkAvailable }: ItemCardProps) 
   const available = item.loan_status === "available";
   const heading = useRef<HTMLHeadingElement>(null);
   const wasAvailable = useRef(available);
-  // The first inventory where the user is an admin or owner. Through it they mark the item
-  // unavailable without a request, whatever their role in the others.
-  const usableThrough = item.inventories.find((inventory) => hasRole(inventory.role, "admin"));
+  // The inventories where the user is an admin or owner. Through any of them they mark the
+  // item unavailable without a request, whatever their role in the others.
+  const usableThrough = item.inventories.filter((inventory) => hasRole(inventory.role, "admin"));
 
   // The card's controls unmount when the item changes between available and not; focus
   // would drop to the page. Only the card the user acted on takes it.
@@ -113,18 +113,14 @@ function ItemCard({ item, actedOn, onRequest, onMarkAvailable }: ItemCardProps) 
       <p className="meta">Owned by {fullName(item.owner)}</p>
       <p className="meta">In {item.inventories.map((inventory) => inventory.name).join(", ")}</p>
       <p className="status">{statusText(item, onMarkAvailable !== undefined)}</p>
-      {available && usableThrough && (
-        <p>
-          <button
-            type="button"
-            aria-label={`Mark ${item.name} unavailable`}
-            onClick={() => onRequest(usableThrough.id)}
-          >
-            Mark unavailable
-          </button>
-        </p>
+      {available && (
+        <BorrowButton
+          item={item}
+          inventories={usableThrough.length > 0 ? usableThrough : item.inventories}
+          wording={usableThrough.length > 0 ? MARK_UNAVAILABLE : REQUEST}
+          onRequest={onRequest}
+        />
       )}
-      {available && !usableThrough && <RequestButton item={item} onRequest={onRequest} />}
       {onMarkAvailable && (
         <p>
           <button
@@ -140,17 +136,48 @@ function ItemCard({ item, actedOn, onRequest, onMarkAvailable }: ItemCardProps) 
   );
 }
 
+interface BorrowWording {
+  button: string;
+  /** The button's accessible name, given the item's name. */
+  label: (itemName: string) => string;
+  choose: string;
+  submit: string;
+  idPrefix: string;
+}
+
+const REQUEST: BorrowWording = {
+  button: "Request",
+  label: (itemName) => `Request ${itemName}`,
+  choose: "Request through",
+  submit: "Send request",
+  idPrefix: "request-through",
+};
+
+const MARK_UNAVAILABLE: BorrowWording = {
+  button: "Mark unavailable",
+  label: (itemName) => `Mark ${itemName} unavailable`,
+  choose: "Mark unavailable through",
+  submit: "Mark unavailable",
+  idPrefix: "use-through",
+};
+
+interface BorrowButtonProps extends Pick<ItemCardProps, "item" | "onRequest"> {
+  /** The inventories offered to borrow through, in order; never empty. */
+  inventories: DiscoverItem["inventories"];
+  wording: BorrowWording;
+}
+
 /**
- * Requests the item. An item listed in several of the user's inventories first asks which
- * one to request through, with the first preselected.
+ * Borrows the item. With several inventories to borrow through it first asks which one,
+ * with the first preselected.
  */
-function RequestButton({ item, onRequest }: Pick<ItemCardProps, "item" | "onRequest">) {
+function BorrowButton({ item, inventories, wording, onRequest }: BorrowButtonProps) {
   const [choosing, setChoosing] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const select = useRef<HTMLSelectElement>(null);
   // Set when the choice closes: the closed form held focus.
   const refocus = useRef(false);
-  const selectId = `request-through-${item.id}`;
+  const selectId = `${wording.idPrefix}-${item.id}`;
 
   useEffect(() => {
     if (choosing) select.current?.focus();
@@ -161,7 +188,7 @@ function RequestButton({ item, onRequest }: Pick<ItemCardProps, "item" | "onRequ
   }, [choosing]);
 
   function start() {
-    if (item.inventories.length === 1) onRequest(item.inventories[0].id);
+    if (inventories.length === 1) onRequest(inventories[0].id);
     else setChoosing(true);
   }
 
@@ -175,8 +202,8 @@ function RequestButton({ item, onRequest }: Pick<ItemCardProps, "item" | "onRequ
   if (!choosing) {
     return (
       <p>
-        <button ref={button} type="button" aria-label={`Request ${item.name}`} onClick={start}>
-          Request
+        <button ref={button} type="button" aria-label={wording.label(item.name)} onClick={start}>
+          {wording.button}
         </button>
       </p>
     );
@@ -184,9 +211,9 @@ function RequestButton({ item, onRequest }: Pick<ItemCardProps, "item" | "onRequ
   return (
     <form onSubmit={submit}>
       <p>
-        <label htmlFor={selectId}>Request through</label>{" "}
+        <label htmlFor={selectId}>{wording.choose}</label>{" "}
         <select ref={select} id={selectId} name="inventory">
-          {item.inventories.map((inventory) => (
+          {inventories.map((inventory) => (
             <option key={inventory.id} value={inventory.id}>
               {inventory.name}
             </option>
@@ -194,7 +221,7 @@ function RequestButton({ item, onRequest }: Pick<ItemCardProps, "item" | "onRequ
         </select>
       </p>
       <p>
-        <button type="submit">Send request</button>{" "}
+        <button type="submit">{wording.submit}</button>{" "}
         <button
           type="button"
           onClick={() => {
