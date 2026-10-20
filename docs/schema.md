@@ -185,8 +185,7 @@ These rules span tables, so the database cannot check them alone.
   row in the other status gets `409`, except that accepting a row that is already
   accepted returns it.
 - Listing an item locks the inventory's row (`select_for_update`), then the item's row.
-  Unlisting locks only the inventory's row. Deleting an item locks only the item's row.
-  Borrow requests, approvals, declines, cancels and mark returned through an inventory
+  Unlisting locks only the inventory's row. Borrow requests, approvals, declines, cancels and mark returned through an inventory
   lock its row first.
 - After locking, the operation re-reads and re-checks the rows it depends on, including the
   acting user's own membership and role.
@@ -197,9 +196,9 @@ These rules span tables, so the database cannot check them alone.
 - The automatic cancels are conditional updates too: they match `loan_status = 'requested'`
   and the `loan_inventory_id` being left or removed.
 - Deleting an item locks the item row (`select_for_update`), then deletes its listings and
-  the row. Listing an item locks the inventory row, then the item row, so a listing either
-  commits before the delete reads the item's listings or finds the item gone (`400`
-  on `item_id`).
+  the row. It takes no inventory lock. Because listing locks the item row, a listing either
+  commits before the delete reads the item's listings or finds the item gone (`400` on
+  `item_id`).
 
 ### Inventories and roles
 
