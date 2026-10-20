@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
+from .inventories import has_role
 from .models import InventoryItem, Item, Membership, Role
 from .phone import normalize_phone_number
 
@@ -154,30 +155,88 @@ class ListedInSerializer(serializers.Serializer):
     name = serializers.CharField(source="inventory.name", read_only=True)
 
 
+class InventoryRefSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+
+
 class ItemSerializer(serializers.ModelSerializer):
-    """An item as its owner sees it, with the inventories it is listed in."""
+    """An item as its owner sees it, with the inventories it is listed in and its loan."""
 
     inventories = ListedInSerializer(source="listings", many=True, read_only=True)
+    borrower = UserSerializer(read_only=True)
+    loan_inventory = InventoryRefSerializer(read_only=True)
 
     class Meta:
         model = Item
-        fields = ["id", "name", "description", "inventories"]
+        fields = [
+            "id",
+            "name",
+            "description",
+            "inventories",
+            "loan_status",
+            "borrower",
+            "loan_inventory",
+        ]
         read_only_fields = fields
 
 
 class ListedItemSerializer(serializers.ModelSerializer):
-    """A listed item as the inventory's members see it. `id` is the item's id."""
+    """A listed item as one member of the inventory sees it. `id` is the item's id. Pass
+    the caller's membership as `context["membership"]`.
+
+    Only admins and owners see the requester or borrower, and only of a request or loan
+    made through this inventory. Other members see the loan status alone, and whether the
+    item is requested by or lent to them.
+    """
 
     id = serializers.IntegerField(source="item.id", read_only=True)
     name = serializers.CharField(source="item.name", read_only=True)
     description = serializers.CharField(source="item.description", read_only=True)
     owner = PersonNameSerializer(source="item.owner", read_only=True)
+    loan_status = serializers.CharField(source="item.loan_status", read_only=True)
+    borrowed_by_me = serializers.SerializerMethodField()
+    borrower = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
-        fields = ["id", "name", "description", "owner"]
+        fields = [
+            "id",
+            "name",
+            "description",
+            "owner",
+            "loan_status",
+            "borrowed_by_me",
+            "borrower",
+        ]
+        read_only_fields = fields
+
+    def get_borrowed_by_me(self, listing):
+        return listing.item.borrower_id == self.context["membership"].user_id
+
+    def get_borrower(self, listing):
+        item = listing.item
+        through_here = item.loan_inventory_id == listing.inventory_id
+        if not through_here or not has_role(self.context["membership"], Role.ADMIN):
+            return None
+        return UserSerializer(item.borrower).data
+
+
+class BorrowedItemSerializer(serializers.ModelSerializer):
+    """An item the caller has requested or borrowed. The owner appears by name only."""
+
+    owner = PersonNameSerializer(read_only=True)
+    loan_inventory = InventoryRefSerializer(read_only=True)
+
+    class Meta:
+        model = Item
+        fields = ["id", "name", "description", "loan_status", "owner", "loan_inventory"]
         read_only_fields = fields
 
 
 class ItemIdSerializer(serializers.Serializer):
     item_id = serializers.IntegerField()
+
+
+class BorrowerIdSerializer(serializers.Serializer):
+    borrower_id = serializers.IntegerField()

@@ -7,9 +7,12 @@ non-member everywhere outside the invite actions.
 Setting a role and removing a member, which includes leaving, lock the inventory row and
 then re-read the caller's membership and the owners, so an inventory always keeps an
 owner. Leaving, being removed and taking the `member` role also delete the user's listings
-in the inventory, under that lock. Deleting locks the inventory row too, then deletes its
-memberships and the row. Each of these locks the inventory before it touches a membership,
-so on one inventory they run one at a time. Renaming and the invite actions take no lock.
+in the inventory and cancel the pending requests for those items, under that lock; leaving
+and being removed also cancel the user's own pending requests made through the inventory.
+Deleting locks the inventory row too, cancels the pending requests made through it, then
+deletes its memberships and the row. Each of these locks the inventory before it touches a
+membership, so on one inventory they run one at a time. Renaming and the invite actions
+take no lock.
 
 Inviting inserts a pending membership; the unique index on (inventory, user) refuses a
 user who is already a member or invited, with `Conflict`. Accepting is one conditional
@@ -33,6 +36,7 @@ from .models import (
     Connection,
     Inventory,
     InventoryItem,
+    Item,
     Membership,
     MembershipStatus,
     Role,
@@ -106,10 +110,14 @@ def lock_as(user_id, inventory_id, role):
 
 
 def _delete_listings(membership):
-    """Deletes the listings of `membership`'s user's items in its inventory."""
+    """Deletes the listings of `membership`'s user's items in its inventory, and cancels the
+    pending requests for those items made through it."""
     InventoryItem.objects.filter(
         inventory_id=membership.inventory_id, item__owner_id=membership.user_id
     ).delete()
+    Item.objects.filter(owner_id=membership.user_id).cancel_requests_through(
+        membership.inventory_id
+    )
 
 
 def _target_membership(inventory_id, user_id):
@@ -155,7 +163,11 @@ def rename_inventory(actor, name):
 @transaction.atomic
 def delete_inventory(actor):
     """`actor` must be an owner."""
-    _lock_inventory(actor.inventory_id).delete()
+    inventory = _lock_inventory(actor.inventory_id)
+    # First: the delete sets `loan_inventory` to null, and `gear_library_item_loan_state`
+    # refuses a pending request without one.
+    Item.objects.cancel_requests_through(inventory.id)
+    inventory.delete()
 
 
 @transaction.atomic
@@ -181,6 +193,7 @@ def remove_member(user, inventory_id, member_user_id):
     target = actor if leaving else _target_membership(inventory_id, member_user_id)
     _refuse_losing_last_owner(target)
     _delete_listings(target)
+    Item.objects.filter(borrower_id=target.user_id).cancel_requests_through(inventory_id)
     target.delete()
 
 

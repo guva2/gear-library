@@ -1,14 +1,18 @@
 """Every change to an item and its listings.
 
 Only an item's owner creates, edits and deletes it. Editing is one conditional update on
-the item's id and owner. Deleting locks the item row, then Django's cascade deletes its
-listings and the row. An item that is gone or not the caller's gets `NotFound`.
+the item's id and owner. An item that is gone or not the caller's gets `NotFound`.
 
 Listing and removing a listing lock the inventory row through `inventories.lock_as`, which
 re-reads the caller's membership, so they run one at a time with every other change that
-takes that lock. Listing then locks the item row: it either commits before a delete of the
-item reads its listings, or finds the item gone. Inventory rows are locked before item
-rows.
+takes that lock. Listing then locks the item row, and removing a listing cancels a pending
+request made through the inventory. Inventory rows are locked before item rows.
+
+Deleting locks the inventories the item is listed in, in ascending `id` order, then the
+item row. It re-reads the listings under those locks: a listing added after the first read
+is in an inventory not locked yet, and locking it while holding the item row would invert
+the order, so the delete starts again. An item on loan is not deleted (`Conflict`).
+Django's cascade deletes the listings and the row.
 
 An item that is not the caller's is a `ValidationError` on `item_id` with one message,
 whether it is missing or someone else's, so the caller learns nothing about other users'
@@ -20,13 +24,14 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 
 from .errors import Conflict, violates
 from .inventories import lock_as
-from .models import ONE_LISTING_PER_ITEM, InventoryItem, Item, Role
+from .models import ONE_LISTING_PER_ITEM, Inventory, InventoryItem, Item, LoanStatus, Role
 
 ITEM_NOT_FOUND = "Item not found."
 NOT_YOUR_ITEM = "You can list only your own items."
 ALREADY_LISTED = "This item is already listed in this inventory."
 LISTING_NOT_FOUND = "This item is not listed in this inventory."
 OWN_ITEMS_ONLY = "Only owners can remove other people's items."
+ON_LOAN = "This item is on loan. It can be deleted once it is returned."
 
 
 def create_item(user, fields):
@@ -41,12 +46,39 @@ def update_item(user, item_id, fields):
         raise NotFound(ITEM_NOT_FOUND)
 
 
+class _ListedMeanwhile(Exception):
+    """The item was listed in an inventory the delete has not locked."""
+
+
+def _inventories_of(item):
+    listed = InventoryItem.objects.filter(item_id=item.pk).values_list("inventory_id", flat=True)
+    return set(listed)
+
+
 @transaction.atomic
-def delete_item(user, item_id):
+def _delete_item(user, item_id):
+    item = Item.objects.filter(pk=item_id, owner=user).first()
+    if item is None:
+        raise NotFound(ITEM_NOT_FOUND)
+    locked = _inventories_of(item)
+    list(Inventory.objects.select_for_update().filter(pk__in=locked).order_by("id"))
     item = Item.objects.select_for_update().filter(pk=item_id, owner=user).first()
     if item is None:
         raise NotFound(ITEM_NOT_FOUND)
+    if item.loan_status == LoanStatus.ON_LOAN:
+        raise Conflict(ON_LOAN)
+    if not _inventories_of(item) <= locked:
+        raise _ListedMeanwhile
     item.delete()
+
+
+def delete_item(user, item_id):
+    # Each new attempt follows a listing the item's owner committed in the meantime.
+    while True:
+        try:
+            return _delete_item(user, item_id)
+        except _ListedMeanwhile:
+            pass
 
 
 @transaction.atomic
@@ -66,7 +98,8 @@ def add_listing(actor, item_id):
         raise
 
 
-def _listing(inventory_id, item_id):
+def get_listing(inventory_id, item_id):
+    """The listing of the item `item_id` in the inventory, with its item."""
     listing = (
         InventoryItem.objects.select_related("item")
         .filter(inventory_id=inventory_id, item_id=item_id)
@@ -82,9 +115,8 @@ def remove_listing(user, inventory_id, item_id):
     """Removes the item `item_id` from the inventory. An owner removes any item, and an
     admin only their own."""
     actor = lock_as(user.id, inventory_id, Role.ADMIN)
-    listing = _listing(inventory_id, item_id)
+    listing = get_listing(inventory_id, item_id)
     if actor.role != Role.OWNER and listing.item.owner_id != user.id:
         raise PermissionDenied(OWN_ITEMS_ONLY)
-    # Deleting the item takes no inventory lock, so it may have removed the listing.
-    if not InventoryItem.objects.filter(pk=listing.pk).delete()[0]:
-        raise NotFound(LISTING_NOT_FOUND)
+    listing.delete()
+    Item.objects.filter(pk=item_id).cancel_requests_through(inventory_id)

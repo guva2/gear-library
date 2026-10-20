@@ -185,19 +185,31 @@ These rules span tables, so the database cannot check them alone.
   row in the other status gets `409`, except that accepting a row that is already
   accepted returns it.
 - Listing an item locks the inventory's row (`select_for_update`), then the item's row.
-  Unlisting locks only the inventory's row. Borrow requests, approvals, declines, cancels
-  and mark returned through an inventory lock its row first.
+  Unlisting locks the inventory's row, deletes the listing, then cancels a pending request
+  made through the inventory. Borrow requests, approvals, declines and mark returned
+  through an inventory lock its row first, then check that the item is listed there.
 - After locking, the operation re-reads and re-checks the rows it depends on, including the
   acting user's own membership and role.
-- Approve, decline, cancel and mark returned are each one conditional update on the item.
-  It matches the `loan_status`, `borrower_id` and `loan_inventory_id` the acting user saw.
-  The item owner's mark returned matches only `loan_status` and `borrower_id`. If no row
-  matches, the request changed in the meantime and the action is rejected.
+- Requesting is one conditional update on the item where `loan_status = 'available'`.
+  Approve, decline and mark returned through an inventory are each one conditional update
+  that matches the `loan_status`, `borrower_id` and `loan_inventory_id` the acting user
+  saw. If no row matches, the request or loan changed in the meantime and the action gets
+  `409`.
+- Cancelling and the item owner's mark returned take no inventory lock. Each is one
+  conditional update on the item: cancelling matches `loan_status = 'requested'` and the
+  caller as `borrower_id`, and the owner's mark returned matches `loan_status = 'on_loan'`
+  and the `borrower_id` the owner saw. A pending request ends when its requester leaves
+  the loan inventory or the item leaves it, so a cancel needs no membership or listing
+  check. A cancel and an approval of the same request wait on the item row, and the second
+  one gets `409`.
 - The automatic cancels are conditional updates too: they match `loan_status = 'requested'`
-  and the `loan_inventory_id` being left or removed.
-- Deleting an item locks the item row (`select_for_update`), then deletes its listings and
-  the row. It takes no inventory lock. Because listing locks the item row, a listing either
-  commits before the delete reads the item's listings or finds the item gone (`400` on
+  and the `loan_inventory_id` being left or removed. Each runs under that inventory's lock.
+- Deleting an item reads the inventories it is listed in, locks them (`select_for_update`)
+  in ascending `id` order, then locks the item row. It then re-reads the item's listings.
+  A listing added in between is in an inventory it has not locked, and taking that lock
+  after the item row would reverse the lock order, so the delete rolls back and starts
+  again. An item `on_loan` gets `409`. Otherwise the delete removes the listings and the
+  row. A listing that waits on the delete's item lock finds the item gone (`400` on
   `item_id`).
 
 ### Inventories and roles
@@ -252,7 +264,8 @@ These rules span tables, so the database cannot check them alone.
 - An admin removes only their own items. An owner removes any item.
 - A listing is removed when its item's owner leaves, is removed, or takes the `member`
   role in that inventory.
-- Removing a listing does not change a loan. The borrower and loan status are on the item.
+- Removing a listing does not end a loan. It cancels a pending request made through that
+  inventory.
 
 ### Borrowing
 

@@ -236,22 +236,6 @@ class TestRemoveListing:
             self.remove_listing(owner, inventory, item)
         assert listed(elsewhere) == {item.id}
 
-    def test_a_listing_deleted_after_it_was_read_is_not_found(
-        self, inventory, owner, monkeypatch
-    ):
-        item = items.create_item(owner, {"name": "Rope"})
-        list_directly(inventory, item)
-        listing_for = items._listing
-
-        def delete_after_reading(*args):
-            found = listing_for(*args)
-            InventoryItem.objects.filter(pk=found.pk).delete()
-            return found
-
-        monkeypatch.setattr(items, "_listing", delete_after_reading)
-
-        with pytest.raises(NotFound):
-            self.remove_listing(owner, inventory, item)
 
 
 @pytest.mark.django_db
@@ -311,7 +295,10 @@ class TestMembershipChangesRemoveListings:
 
 
 INSERT_LISTING = 'INSERT INTO "gear_library_inventoryitem" '
+DELETE_LISTING = 'DELETE FROM "gear_library_inventoryitem" '
 SELECT_ITEM = 'SELECT "gear_library_item".'
+SELECT_INVENTORY = 'SELECT "gear_library_inventory".'
+FOR_UPDATE = " FOR UPDATE"
 
 
 @pytest.mark.django_db(transaction=True)
@@ -348,7 +335,7 @@ class TestCommittedRaces:
         held, release = threading.Event(), threading.Event()
 
         def delete():
-            with connection.execute_wrapper(hold_after(SELECT_ITEM, held, release)):
+            with connection.execute_wrapper(hold_after(SELECT_ITEM, held, release, FOR_UPDATE)):
                 items.delete_item(owner, item.id)
 
         outcomes = self.race(delete, lambda: items.add_listing(actor, item.id), held, release)
@@ -372,6 +359,44 @@ class TestCommittedRaces:
         assert outcomes == {"first": "ok", "second": "ok"}
         assert not Item.objects.exists()
         assert not InventoryItem.objects.exists()
+
+    def test_an_item_delete_locks_an_inventory_the_item_was_listed_in_after_it_started(
+        self, inventory, owner, item
+    ):
+        """The listing commits after the delete read the item's listings and before it
+        locked the item. The delete must not delete that listing without its inventory's
+        lock, and cannot take that lock while it holds the item row."""
+        list_directly(inventory, item)
+        camping = inventories.create_inventory(owner, "Camping").inventory
+        statements, listed_elsewhere = [], threading.Event()
+
+        def list_it_first(execute, sql, params, many, context):
+            is_item_lock = sql.startswith(SELECT_ITEM) and sql.endswith(FOR_UPDATE)
+            if is_item_lock and not listed_elsewhere.is_set():
+                listed_elsewhere.set()
+                outcomes = {}
+                run_in_thread(
+                    "lister", lambda: items.add_listing(as_(owner, camping), item.id), outcomes
+                ).join(10)
+                assert outcomes == {"lister": "ok"}
+            statements.append((sql, params))
+            return execute(sql, params, many, context)
+
+        with connection.execute_wrapper(list_it_first):
+            items.delete_item(owner, item.id)
+
+        assert listed_elsewhere.is_set()
+        assert not Item.objects.exists()
+        assert not InventoryItem.objects.exists()
+        first_listing_delete = next(
+            i for i, (sql, _) in enumerate(statements) if sql.startswith(DELETE_LISTING)
+        )
+        inventory_locks = [
+            params
+            for sql, params in statements[:first_listing_delete]
+            if sql.startswith(SELECT_INVENTORY) and sql.endswith(FOR_UPDATE)
+        ]
+        assert any(camping.id in params for params in inventory_locks)
 
     def test_a_listing_waits_for_the_lister_taking_the_member_role_and_is_refused(
         self, inventory, owner, item

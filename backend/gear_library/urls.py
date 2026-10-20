@@ -32,6 +32,26 @@ urlpatterns = [
         views.inventory_item_detail,
         name="inventory-item-detail",
     ),
+    path(
+        "inventories/<int:inventory_id>/items/<int:item_id>/borrow/",
+        views.borrow_item,
+        name="borrow-item",
+    ),
+    path(
+        "inventories/<int:inventory_id>/items/<int:item_id>/approve/",
+        views.approve_loan,
+        name="approve-loan",
+    ),
+    path(
+        "inventories/<int:inventory_id>/items/<int:item_id>/decline/",
+        views.decline_loan,
+        name="decline-loan",
+    ),
+    path(
+        "inventories/<int:inventory_id>/items/<int:item_id>/return/",
+        views.return_loan,
+        name="return-loan",
+    ),
     path("invites/", views.my_invites, name="my-invites"),
     path("invites/<int:invite_id>/accept/", views.accept_invite, name="accept-invite"),
     path("invites/<int:invite_id>/decline/", views.decline_invite, name="decline-invite"),
@@ -60,4 +80,7 @@ urlpatterns = [
     ),
     path("items/", views.item_list, name="item-list"),
     path("items/<int:item_id>/", views.item_detail, name="item-detail"),
+    path("items/<int:item_id>/return/", views.owner_return_item, name="owner-return-item"),
+    path("borrowing/", views.borrowing, name="borrowing"),
+    path("borrowing/<int:item_id>/cancel/", views.cancel_request, name="cancel-request"),
 ]

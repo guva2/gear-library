@@ -8,6 +8,8 @@ type Routes = Parameters<typeof fakeBackend>[0];
 type Role = "member" | "admin" | "owner";
 
 const URL = "/api/inventories/7/";
+// The loan fields of a listed item that nobody has requested.
+const AVAILABLE = { loan_status: "available", borrowed_by_me: false, borrower: null } as const;
 const PHONE_NUMBER = /\(?[0-9]{3}\)? ?[0-9]{3}-?[0-9]{4}/;
 
 const BOB = { id: 2, first_name: "Bob", last_name: "Stone", phone_number: "5551230002" };
@@ -536,12 +538,14 @@ describe("items", () => {
     name: "Rope",
     description: "60 m dynamic",
     owner: { first_name: "Ada", last_name: "Lovelace" },
+    ...AVAILABLE,
   };
   const TENT: ListedItem = {
     id: 21,
     name: "Tent",
     description: "",
     owner: { first_name: "Bob", last_name: "Stone" },
+    ...AVAILABLE,
   };
   const HELMET = { id: 23, name: "Helmet", description: "", inventories: [] };
   // What listing the helmet returns.
@@ -550,6 +554,7 @@ describe("items", () => {
     name: HELMET.name,
     description: HELMET.description,
     owner: ROPE.owner,
+    ...AVAILABLE,
   };
   // The caller's own items: the rope is listed here, the axe and the helmet are not.
   const MY_ITEMS = [
@@ -749,6 +754,215 @@ describe("items", () => {
 
     const empty = await within(region("Items")).findByText(/No items to list/);
     await waitFor(() => expect(empty).toHaveFocus());
+  });
+});
+
+describe("borrowing", () => {
+  const BOBS = { first_name: "Bob", last_name: "Stone" };
+  const ROPE: ListedItem = { id: 20, name: "Rope", description: "", owner: BOBS, ...AVAILABLE };
+  const TENT: ListedItem = { ...ROPE, id: 21, name: "Tent", loan_status: "requested" };
+  const STOVE: ListedItem = { ...ROPE, id: 22, name: "Stove", loan_status: "on_loan" };
+  const MIAS_PHONE = "(555) 123-0003";
+
+  function withListed(role: Role, listed: () => ListedItem[], routes: Routes = {}) {
+    return asRole(role, {
+      [`GET ${URL}items/`]: () => json(200, listed())({}),
+      ...(role === "member" ? { [`GET ${URL}members/`]: json(200, []) } : {}),
+      ...routes,
+    });
+  }
+
+  function itemFor(name: string) {
+    const items = within(region("Items")).getAllByRole("listitem");
+    const found = items.find((item) => item.firstChild?.textContent?.startsWith(name));
+    if (!found) throw new Error(`No item ${name}`);
+    return found;
+  }
+
+  function buttonNames() {
+    return within(region("Items"))
+      .queryAllByRole("button")
+      .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+  }
+
+  describe("as a member", () => {
+    it("shows each item's status, and Request only on available items", async () => {
+      withListed("member", () => [ROPE, STOVE, TENT]);
+
+      await open();
+
+      expect(within(itemFor("Rope")).getByText("Available")).toBeVisible();
+      expect(within(itemFor("Tent")).getByText("Requested")).toBeVisible();
+      expect(within(itemFor("Stove")).getByText("On loan")).toBeVisible();
+      expect(buttonNames()).toEqual(["Request Rope"]);
+    });
+
+    it("requests an item, reloads, and then offers Cancel", async () => {
+      let rope = ROPE;
+      const backend = withListed("member", () => [rope], {
+        [`POST ${URL}items/20/borrow/`]: () => {
+          rope = { ...ROPE, loan_status: "requested", borrowed_by_me: true };
+          return empty(204)({});
+        },
+      });
+      await open();
+
+      fireEvent.click(screen.getByRole("button", { name: "Request Rope" }));
+
+      expect(await within(itemFor("Rope")).findByText("Requested by you")).toBeVisible();
+      expect(buttonNames()).toEqual(["Cancel request for Rope"]);
+      expect(backend.requests(`POST ${URL}items/20/borrow/`)).toEqual([undefined]);
+    });
+
+    it("cancels their own pending request and reloads", async () => {
+      let rope: ListedItem = { ...ROPE, loan_status: "requested", borrowed_by_me: true };
+      const backend = withListed("member", () => [rope], {
+        "POST /api/borrowing/20/cancel/": () => {
+          rope = ROPE;
+          return empty(204)({});
+        },
+      });
+      await open();
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel request for Rope" }));
+
+      expect(await within(itemFor("Rope")).findByText("Available")).toBeVisible();
+      expect(backend.requests("POST /api/borrowing/20/cancel/")).toEqual([undefined]);
+    });
+
+    it("shows why a request was refused", async () => {
+      withListed("member", () => [ROPE], {
+        [`POST ${URL}items/20/borrow/`]: json(409, {
+          detail: "This item has already been requested or is on loan.",
+        }),
+      });
+      await open();
+
+      fireEvent.click(screen.getByRole("button", { name: "Request Rope" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "This item has already been requested or is on loan.",
+      );
+    });
+
+    it("shows their own loan with nothing to do", async () => {
+      withListed("member", () => [{ ...STOVE, borrowed_by_me: true }]);
+
+      await open();
+
+      expect(within(itemFor("Stove")).getByText("On loan to you")).toBeVisible();
+      expect(buttonNames()).toEqual([]);
+    });
+  });
+
+  describe("as an admin", () => {
+    const THROUGH_HERE = { borrower: MIA };
+    // On loan through another inventory, so the admin sees no borrower.
+    const LAMP: ListedItem = { ...STOVE, id: 23, name: "Lamp" };
+
+    it("shows the requester or borrower of a loan through this inventory, with their phone number", async () => {
+      withListed("admin", () => [
+        LAMP,
+        { ...STOVE, ...THROUGH_HERE },
+        { ...TENT, ...THROUGH_HERE },
+      ]);
+
+      await open();
+
+      const tent = within(itemFor("Tent"));
+      expect(tent.getByText(`Requested by Mia Lee, ${MIAS_PHONE}`)).toBeVisible();
+      const stove = within(itemFor("Stove"));
+      expect(stove.getByText(`On loan to Mia Lee, ${MIAS_PHONE}`)).toBeVisible();
+      expect(within(itemFor("Lamp")).getByText("On loan")).toBeVisible();
+      expect(buttonNames()).toEqual([
+        "Mark Stove returned",
+        "Approve request for Tent",
+        "Decline request for Tent",
+      ]);
+    });
+
+    it.each([
+      ["Approve request for Tent", "approve", "on_loan"],
+      ["Decline request for Tent", "decline", "available"],
+    ] as const)("%s sends the requester it showed and reloads", async (button, action, after) => {
+      let tent: ListedItem = { ...TENT, ...THROUGH_HERE };
+      const backend = withListed("admin", () => [tent], {
+        [`POST ${URL}items/21/${action}/`]: () => {
+          tent = { ...TENT, loan_status: after, borrower: after === "on_loan" ? MIA : null };
+          return empty(204)({});
+        },
+      });
+      await open();
+
+      fireEvent.click(screen.getByRole("button", { name: button }));
+
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: button })).toBeNull(),
+      );
+      expect(backend.requests(`POST ${URL}items/21/${action}/`)).toEqual([{ borrower_id: MIA.id }]);
+    });
+
+    it("marks an item on loan through this inventory returned and reloads", async () => {
+      let stove: ListedItem = { ...STOVE, ...THROUGH_HERE };
+      const backend = withListed("admin", () => [stove], {
+        [`POST ${URL}items/22/return/`]: () => {
+          stove = { ...STOVE, loan_status: "available" };
+          return empty(204)({});
+        },
+      });
+      await open();
+
+      fireEvent.click(screen.getByRole("button", { name: "Mark Stove returned" }));
+
+      expect(await within(itemFor("Stove")).findByText("Available")).toBeVisible();
+      expect(backend.requests(`POST ${URL}items/22/return/`)).toEqual([{ borrower_id: MIA.id }]);
+    });
+
+    it("shows why an approval was refused", async () => {
+      withListed("admin", () => [{ ...TENT, ...THROUGH_HERE }], {
+        [`POST ${URL}items/21/approve/`]: json(409, {
+          detail: "This request or loan changed. Try again.",
+        }),
+      });
+      await open();
+
+      fireEvent.click(screen.getByRole("button", { name: "Approve request for Tent" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "This request or loan changed. Try again.",
+      );
+    });
+
+    it("offers no Approve, Decline or Mark returned on their own request or loan", async () => {
+      const mine = { borrower: ADA, borrowed_by_me: true };
+      withListed("admin", () => [
+        { ...STOVE, ...mine },
+        { ...TENT, ...mine },
+      ]);
+
+      await open();
+
+      expect(within(itemFor("Tent")).getByText("Requested by you")).toBeVisible();
+      expect(within(itemFor("Stove")).getByText("On loan to you")).toBeVisible();
+      expect(buttonNames()).toEqual(["Cancel request for Tent"]);
+    });
+
+    it("offers no Request on their own items", async () => {
+      withListed("admin", () => [ROPE], {
+        "GET /api/items/": json(200, [
+          {
+            id: ROPE.id,
+            name: ROPE.name,
+            description: "",
+            inventories: [{ id: 7, name: "Climbing Club" }],
+          },
+        ]),
+      });
+
+      await open();
+
+      expect(screen.queryByRole("button", { name: "Request Rope" })).toBeNull();
+    });
   });
 });
 

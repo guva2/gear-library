@@ -589,13 +589,14 @@ UPDATE_MEMBERSHIP = 'UPDATE "gear_library_membership" '
 SELECT_INVENTORY = 'SELECT "gear_library_inventory".'
 
 
-def hold_after(sql_prefix, held, release):
-    """An execute wrapper that, after the first statement starting with `sql_prefix`,
-    sets `held` and waits for `release` before the transaction goes on."""
+def hold_after(sql_prefix, held, release, sql_suffix=""):
+    """An execute wrapper that, after the first statement starting with `sql_prefix` and
+    ending with `sql_suffix`, sets `held` and waits for `release` before the transaction
+    goes on."""
 
     def wrapper(execute, sql, params, many, context):
         result = execute(sql, params, many, context)
-        if sql.startswith(sql_prefix) and not held.is_set():
+        if sql.startswith(sql_prefix) and sql.endswith(sql_suffix) and not held.is_set():
             held.set()
             assert release.wait(10)
         return result

@@ -15,10 +15,12 @@ from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
 
-from . import connections, inventories, items
+from . import connections, inventories, items, loans
 from .authentication import CsrfSessionAuthentication
 from .models import Connection, ConnectionStatus, InventoryItem, Item, Membership, Role
 from .serializers import (
+    BorrowedItemSerializer,
+    BorrowerIdSerializer,
     ConnectionSerializer,
     InventoryInviteSerializer,
     InventoryNameSerializer,
@@ -318,6 +320,7 @@ def _items_of(user):
     )
     return (
         Item.objects.filter(owner=user)
+        .select_related("borrower", "loan_inventory")
         .prefetch_related(Prefetch("listings", queryset=listings))
         .order_by("name", "id")
     )
@@ -356,17 +359,72 @@ def inventory_items(request, inventory_id):
         actor = inventories.get_membership(request.user, inventory_id, Role.ADMIN)
         item_id = _validated(ItemIdSerializer, request)["item_id"]
         listing = items.add_listing(actor, item_id)
-        return Response(ListedItemSerializer(listing).data, status=status.HTTP_201_CREATED)
-    inventories.get_membership(request.user, inventory_id)
+        data = ListedItemSerializer(listing, context={"membership": actor}).data
+        return Response(data, status=status.HTTP_201_CREATED)
+    membership = inventories.get_membership(request.user, inventory_id)
     listings = (
         InventoryItem.objects.filter(inventory_id=inventory_id)
-        .select_related("item__owner")
+        .select_related("item__owner", "item__borrower")
         .order_by("item__name", "item_id")
     )
-    return Response(ListedItemSerializer(listings, many=True).data)
+    context = {"membership": membership}
+    return Response(ListedItemSerializer(listings, many=True, context=context).data)
 
 
 @api_view(["DELETE"])
 def inventory_item_detail(request, inventory_id, item_id):
     items.remove_listing(request.user, inventory_id, item_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["POST"])
+def borrow_item(request, inventory_id, item_id):
+    loans.request_item(request.user, inventory_id, item_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _change_loan(change, request, inventory_id, item_id):
+    inventories.get_membership(request.user, inventory_id, Role.ADMIN)
+    borrower_id = _validated(BorrowerIdSerializer, request)["borrower_id"]
+    change(request.user, inventory_id, item_id, borrower_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["POST"])
+def approve_loan(request, inventory_id, item_id):
+    return _change_loan(loans.approve, request, inventory_id, item_id)
+
+
+@api_view(["POST"])
+def decline_loan(request, inventory_id, item_id):
+    return _change_loan(loans.decline, request, inventory_id, item_id)
+
+
+@api_view(["POST"])
+def return_loan(request, inventory_id, item_id):
+    return _change_loan(loans.mark_returned, request, inventory_id, item_id)
+
+
+@api_view(["POST"])
+def owner_return_item(request, item_id):
+    if not Item.objects.filter(pk=item_id, owner=request.user).exists():
+        raise NotFound(items.ITEM_NOT_FOUND)
+    borrower_id = _validated(BorrowerIdSerializer, request)["borrower_id"]
+    loans.owner_mark_returned(request.user, item_id, borrower_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET"])
+def borrowing(request):
+    borrowed = (
+        Item.objects.filter(borrower=request.user)
+        .select_related("owner", "loan_inventory")
+        .order_by("name", "id")
+    )
+    return Response(BorrowedItemSerializer(borrowed, many=True).data)
+
+
+@api_view(["POST"])
+def cancel_request(request, item_id):
+    loans.cancel(request.user, item_id)
     return Response(status=status.HTTP_204_NO_CONTENT)

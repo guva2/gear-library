@@ -8,6 +8,10 @@ User = get_user_model()
 
 ITEMS_URL = "/api/items/"
 
+# The loan fields of an available item, in an Item and in a Listed item.
+NO_LOAN = {"loan_status": "available", "borrower": None, "loan_inventory": None}
+AVAILABLE = {"loan_status": "available", "borrowed_by_me": False, "borrower": None}
+
 
 def item_url(item):
     return f"{ITEMS_URL}{item.id}/"
@@ -102,7 +106,7 @@ class TestMyItems:
 
         assert response.status_code == 200
         assert response.json() == [
-            {"id": axe.id, "name": "Axe", "description": "", "inventories": []},
+            {"id": axe.id, "name": "Axe", "description": "", "inventories": [], **NO_LOAN},
             {
                 "id": rope.id,
                 "name": "Rope",
@@ -111,6 +115,7 @@ class TestMyItems:
                     {"id": camping.id, "name": "Camping"},
                     {"id": people["inventory"].id, "name": "Climbing"},
                 ],
+                **NO_LOAN,
             },
         ]
 
@@ -126,6 +131,7 @@ class TestMyItems:
             "name": "Rope",
             "description": "60 m",
             "inventories": [],
+            **NO_LOAN,
         }
         assert item.owner == people["stranger"]
 
@@ -178,6 +184,7 @@ class TestItemDetail:
             "name": "Rope",
             "description": "60 m",
             "inventories": [{"id": people["inventory"].id, "name": "Climbing"}],
+            **NO_LOAN,
         }
 
     def test_an_invalid_edit_changes_nothing(self, people, rope):
@@ -239,12 +246,14 @@ class TestInventoryItems:
                 "name": "Rope",
                 "description": "60 m",
                 "owner": {"first_name": "Adam", "last_name": "L2"},
+                **AVAILABLE,
             },
             {
                 "id": tent.id,
                 "name": "Tent",
                 "description": "",
                 "owner": {"first_name": "Olive", "last_name": "L1"},
+                **AVAILABLE,
             },
         ]
 
@@ -267,6 +276,7 @@ class TestInventoryItems:
             "name": "Rope",
             "description": "60 m",
             "owner": {"first_name": "Adam", "last_name": "L2"},
+            **AVAILABLE,
         }
         assert listed(people["inventory"]) == {rope.id}
 
