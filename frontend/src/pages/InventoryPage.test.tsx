@@ -296,7 +296,7 @@ describe("as an admin", () => {
 
       const alert = await within(region("Pending invites")).findByRole("alert");
       await waitFor(() => expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull());
-      expect(alert).toHaveFocus();
+      await waitFor(() => expect(alert).toHaveFocus());
     });
 
     it("moves focus to the empty-state paragraph otherwise", async () => {
@@ -306,7 +306,7 @@ describe("as an admin", () => {
       fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
       const empty = await within(region("Pending invites")).findByText(/No connections to invite/);
-      expect(empty).toHaveFocus();
+      await waitFor(() => expect(empty).toHaveFocus());
     });
   });
 
@@ -684,7 +684,24 @@ describe("items", () => {
     fireEvent.click(screen.getByRole("button", { name: "List item" }));
 
     expect(await within(region("Items")).findByRole("alert")).toHaveTextContent(
-      "Axe was not listed. This item is already listed in this inventory.",
+      '"Axe" was not listed. This item is already listed in this inventory.',
+    );
+  });
+
+  it("names a refused item the way its option is labelled", async () => {
+    withItems("admin", {
+      "GET /api/items/": json(200, [
+        { id: 30, name: "Stove", description: "gas", inventories: [] },
+        { id: 31, name: "Stove", description: "", inventories: [] },
+      ]),
+      [`POST ${URL}items/`]: json(409, { detail: "Not today." }),
+    });
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: "List item" }));
+
+    expect(await within(region("Items")).findByRole("alert")).toHaveTextContent(
+      '"Stove: gas" was not listed. Not today.',
     );
   });
 
