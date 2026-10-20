@@ -2,7 +2,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
-from gear_library.models import Inventory, Membership
+from gear_library.models import Connection, Inventory, Membership, ordered_pair
 
 User = get_user_model()
 
@@ -38,6 +38,13 @@ def full(user, role):
 
 def name_of(user):
     return {"first_name": user.first_name, "last_name": user.last_name}
+
+
+def connect(user, other):
+    first, second = ordered_pair(user, other)
+    return Connection.objects.create(
+        first_user_id=first, second_user_id=second, requested_by=user, status="accepted"
+    )
 
 
 def add_pending(inventory, user, invited_by):
@@ -148,7 +155,7 @@ class TestInventories:
         url = inventory_url(people["inventory"], suffix)
 
         response = getattr(client, method)(
-            url, {"name": "x", "role": "member", "phone_number": "5551230005"}, format="json"
+            url, {"name": "x", "role": "member", "user_id": people["stranger"].id}, format="json"
         )
 
         assert response.status_code == 404
@@ -300,16 +307,21 @@ class TestMembers:
 
 @pytest.mark.django_db
 class TestInventoryInvites:
-    def invite(self, people, actor, phone_number):
+    @pytest.fixture(autouse=True)
+    def connections(self, people):
+        """The owner and the admin are connected to everyone else."""
+        for actor in ("owner", "admin"):
+            for person in ("member", "pending", "stranger"):
+                connect(people[actor], people[person])
+
+    def invite(self, people, actor, body):
         return client_for(people[actor]).post(
-            inventory_url(people["inventory"], "invites/"),
-            {"phone_number": phone_number},
-            format="json",
+            inventory_url(people["inventory"], "invites/"), body, format="json"
         )
 
     @pytest.mark.parametrize("actor", ["admin", "owner"])
-    def test_admins_and_owners_invite_by_a_formatted_phone_number(self, people, actor):
-        response = self.invite(people, actor, "(555) 123-0005")
+    def test_admins_and_owners_invite_a_connection(self, people, actor):
+        response = self.invite(people, actor, {"user_id": people["stranger"].id})
 
         assert response.status_code == 201
         invite = Membership.objects.get(user=people["stranger"])
@@ -321,25 +333,56 @@ class TestInventoryInvites:
         }
 
     def test_a_member_cannot_invite(self, people):
-        assert self.invite(people, "member", "5551230005").status_code == 403
+        response = self.invite(people, "member", {"user_id": people["stranger"].id})
+
+        assert response.status_code == 403
         assert not Membership.objects.filter(user=people["stranger"]).exists()
 
+    def test_access_is_checked_before_the_body(self, people):
+        assert self.invite(people, "member", {"user_id": "x"}).status_code == 403
+        assert self.invite(people, "stranger", {}).status_code == 404
+
     @pytest.mark.parametrize(
-        "phone_number, message",
-        [
-            ("555", "Enter a 10-digit US phone number."),
-            ("5559999999", "No user has this phone number."),
-        ],
+        "who", ["no such user", "not connected", "pending request", "the caller"]
     )
-    def test_rejects_an_invalid_or_unknown_phone_number(self, people, phone_number, message):
-        response = self.invite(people, "owner", phone_number)
+    def test_anyone_but_a_connection_gets_one_message(self, people, who):
+        other = make_user(6)
+        if who == "pending request":
+            first, second = ordered_pair(people["owner"], other)
+            Connection.objects.create(
+                first_user_id=first, second_user_id=second, requested_by=other, status="pending"
+            )
+        user_id = {"no such user": 999999, "the caller": people["owner"].id}.get(who, other.id)
+
+        response = self.invite(people, "owner", {"user_id": user_id})
 
         assert response.status_code == 400
-        assert response.json() == {"phone_number": [message]}
+        assert response.json() == {"user_id": ["You can invite only your connections."]}
+
+    @pytest.mark.parametrize(
+        "body, message",
+        [
+            ({}, "This field is required."),
+            ({"user_id": "x"}, "A valid integer is required."),
+            ({"phone_number": "5551230005"}, "This field is required."),
+        ],
+    )
+    def test_rejects_a_missing_or_invalid_user_id(self, people, body, message):
+        response = self.invite(people, "owner", body)
+
+        assert response.status_code == 400
+        assert response.json() == {"user_id": [message]}
+
+    @pytest.mark.parametrize("user_id", [-1, 0, 2**63, 10**30])
+    def test_an_id_out_of_range_gets_the_same_message(self, people, user_id):
+        response = self.invite(people, "owner", {"user_id": user_id})
+
+        assert response.status_code == 400
+        assert response.json() == {"user_id": ["You can invite only your connections."]}
 
     @pytest.mark.parametrize("person", ["member", "pending"])
     def test_inviting_a_member_or_someone_already_invited_conflicts(self, people, person):
-        response = self.invite(people, "owner", people[person].phone_number)
+        response = self.invite(people, "owner", {"user_id": people[person].id})
 
         assert response.status_code == 409
         assert response.json() == {
@@ -360,7 +403,7 @@ class TestInventoryInvites:
         ]
 
     def test_a_pending_invite_shows_the_invitee_only_by_phone_number(self, people):
-        created = self.invite(people, "owner", "5551230005").json()
+        created = self.invite(people, "owner", {"user_id": people["stranger"].id}).json()
         listed = client_for(people["owner"]).get(inventory_url(people["inventory"], "invites/"))
 
         for body in [created, *listed.json()]:

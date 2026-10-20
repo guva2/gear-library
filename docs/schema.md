@@ -71,10 +71,10 @@ accepted. Only an `active` row makes the user a member.
 - Each role has the rights of the roles before it:
   - `member`: sees the inventory and its items, sees the names of its admins and owners,
     and requests to borrow its items.
-  - `admin`: also sees every member with their phone number and role, invites users, sees
-    and revokes any pending invite, lists their own items in the inventory and removes
-    them, approves and declines borrow requests made through the inventory, and marks
-    those items returned.
+  - `admin`: also sees every member with their phone number and role, invites their own
+    accepted connections, sees and revokes any pending invite, lists their own items in
+    the inventory and removes them, approves and declines borrow requests made through
+    the inventory, and marks those items returned.
   - `owner`: also removes members, sets any member's role, removes any item from the
     inventory, renames the inventory and deletes it.
 
@@ -155,9 +155,10 @@ These rules span tables, so the database cannot check them alone.
   run one at a time.
 - Renaming an inventory, inviting, accepting, declining and revoking take no inventory
   lock and no explicit lock.
-- Inviting inserts a pending membership. The unique index on (`inventory_id`, `user_id`)
-  refuses it when the user is already a member or invited (`409`). Two invites to the same
-  user at once: the second waits on the index until the first commits, then gets `409`.
+- Inviting checks that the invitee is an accepted connection of the sender, then inserts a
+  pending membership. The unique index on (`inventory_id`, `user_id`) refuses it when the
+  user is already a member or invited (`409`). Two invites to the same user at once: the
+  second waits on the index until the first commits, then gets `409`.
 - Accepting is one conditional update: `SET status = 'active'` where the row is the
   caller's and `status = 'pending'`. If the row is already active, accepting returns it
   (`200`). If the row is gone, accepting gets `404`.
@@ -201,15 +202,17 @@ These rules span tables, so the database cannot check them alone.
 - Creating an inventory makes the creator its owner.
 - An inventory must keep at least one owner. The last owner cannot leave, be removed, or
   take a lower role. They must make another member an owner or delete the inventory.
-- Admins and owners invite users and revoke any pending invite of the inventory. Only
-  owners set roles and remove members. Owners set any member's role, including another
-  owner's and their own.
+- Admins and owners invite their own accepted connections and revoke any pending invite
+  of the inventory. Only owners set roles and remove members. Owners set any member's
+  role, including another owner's and their own.
 - An invite is a pending membership. Invites go only to users who are not members, and a
   user has at most one pending invite per inventory. Accepting makes the membership
   active with the `member` role, and accepting again succeeds while the membership is
   active. Declining or revoking deletes the pending membership, after which the user can
   be invited again. A pending invite stays valid if its sender leaves or takes the
   `member` role.
+- The connection is checked only when the invite is sent. Removing the connection later
+  leaves the pending invite, or the membership it became, as it is.
 - A pending membership gives no access. Its user is treated as a non-member of the
   inventory everywhere, is not counted as an owner, and appears only in the inventory's
   pending invites.

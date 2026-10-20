@@ -5,9 +5,9 @@ share gear: only its members see it and the items listed in it. You can create o
 number of inventories, and you have one role in each:
 
 - `member`: sees and borrows the inventory's items, and sees who its admins and owners are.
-- `admin`: also sees every member, invites users and revokes invites, lists and removes
-  their own items, approves and declines borrow requests made through the inventory, and
-  marks those items returned.
+- `admin`: also sees every member, invites their connections and revokes invites, lists
+  and removes their own items, approves and declines borrow requests made through the
+  inventory, and marks those items returned.
 - `owner`: also sets members' roles, removes members, and renames or deletes the
   inventory.
 
@@ -89,7 +89,9 @@ docker compose run --rm backend python manage.py seed_demo
 creates three demo users, two inventories and the users' connections. Running it again
 changes nothing: users that already exist are left as they are, a demo inventory is skipped
 when its owner below is already in an inventory with that name, and a demo connection is
-skipped when the two users already have a connection or a request. Log in at <http://localhost:5173> with any
+skipped when the two users already have a connection or a request. A database seeded by an
+older version of this command therefore keeps its old connections; to reset them, delete the
+demo users' connections and run `seed_demo` again. Log in at <http://localhost:5173> with any
 of them, using the password `gear-library-demo`:
 
 | Phone number | Name | Climbing Club | Camping Crew |
@@ -100,6 +102,6 @@ of them, using the password `gear-library-demo`:
 
 Connections:
 
-- Avery and Jordan are connected.
+- Sam and Avery are connected.
 - Jordan and Sam are connected.
-- Sam has sent Avery a request, which is pending.
+- Avery has sent Jordan a request, which is pending.
