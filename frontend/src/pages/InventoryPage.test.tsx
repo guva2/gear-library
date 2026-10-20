@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ADA, empty, fakeBackend, json } from "../test-backend";
+import type { ListedItem } from "../items";
 import { fillIn, renderAt } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
@@ -46,6 +47,7 @@ function asRole(role: Role, routes: Routes = {}) {
   return fakeBackend({
     "GET /api/auth/me/": json(200, ADA),
     [`GET ${URL}`]: json(200, { id: 7, name: "Climbing Club", role }),
+    [`GET ${URL}items/`]: json(200, []),
     ...staffRoutes,
     ...routes,
   });
@@ -294,7 +296,7 @@ describe("as an admin", () => {
 
       const alert = await within(region("Pending invites")).findByRole("alert");
       await waitFor(() => expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull());
-      expect(alert).toHaveFocus();
+      await waitFor(() => expect(alert).toHaveFocus());
     });
 
     it("moves focus to the empty-state paragraph otherwise", async () => {
@@ -304,7 +306,7 @@ describe("as an admin", () => {
       fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
       const empty = await within(region("Pending invites")).findByText(/No connections to invite/);
-      expect(empty).toHaveFocus();
+      await waitFor(() => expect(empty).toHaveFocus());
     });
   });
 
@@ -525,6 +527,228 @@ describe("as an owner", () => {
 
     expect(await screen.findByRole("heading", { name: "My inventories" })).toBeInTheDocument();
     expect(backend.requests(`DELETE ${URL}`)).toHaveLength(1);
+  });
+});
+
+describe("items", () => {
+  const ROPE: ListedItem = {
+    id: 20,
+    name: "Rope",
+    description: "60 m dynamic",
+    owner: { first_name: "Ada", last_name: "Lovelace" },
+  };
+  const TENT: ListedItem = {
+    id: 21,
+    name: "Tent",
+    description: "",
+    owner: { first_name: "Bob", last_name: "Stone" },
+  };
+  const HELMET = { id: 23, name: "Helmet", description: "", inventories: [] };
+  // What listing the helmet returns.
+  const LISTED_HELMET: ListedItem = {
+    id: HELMET.id,
+    name: HELMET.name,
+    description: HELMET.description,
+    owner: ROPE.owner,
+  };
+  // The caller's own items: the rope is listed here, the axe and the helmet are not.
+  const MY_ITEMS = [
+    { id: 22, name: "Axe", description: "", inventories: [] },
+    HELMET,
+    {
+      id: ROPE.id,
+      name: ROPE.name,
+      description: ROPE.description,
+      inventories: [{ id: 7, name: "Climbing Club" }],
+    },
+  ];
+
+  function withItems(role: Role, routes: Routes = {}) {
+    return asRole(role, {
+      [`GET ${URL}items/`]: json(200, [ROPE, TENT]),
+      "GET /api/items/": json(200, MY_ITEMS),
+      ...(role === "member" ? { [`GET ${URL}members/`]: json(200, []) } : {}),
+      ...routes,
+    });
+  }
+
+  function itemTexts() {
+    return within(region("Items"))
+      .getAllByRole("listitem")
+      .map((item) => item.firstChild?.textContent);
+  }
+
+  function pickerOptions() {
+    const picker = screen.getByRole("combobox", { name: "Item" });
+    return within(picker).getAllByRole("option").map((option) => option.textContent);
+  }
+
+  it("shows a member every listed item with its owner, and nothing to change", async () => {
+    const backend = withItems("member");
+
+    await open();
+
+    expect(itemTexts()).toEqual([
+      "Rope: 60 m dynamic, owned by Ada Lovelace",
+      "Tent, owned by Bob Stone",
+    ]);
+    expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Item" })).toBeNull();
+    expect(backend.requests("GET /api/items/")).toHaveLength(0);
+  });
+
+  it("says so when nothing is listed", async () => {
+    asRole("member", { [`GET ${URL}members/`]: json(200, []) });
+
+    await open();
+
+    expect(within(region("Items")).getByText("No items listed yet.")).toBeInTheDocument();
+  });
+
+  it("lets an admin remove only their own items", async () => {
+    withItems("admin");
+
+    await open();
+
+    expect(screen.getByRole("button", { name: "Remove Rope from the inventory" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Remove Tent from the inventory" })).toBeNull();
+  });
+
+  it("lets an owner remove any item, and reloads", async () => {
+    let listed = [ROPE, TENT];
+    const backend = withItems("owner", {
+      [`GET ${URL}items/`]: () => json(200, listed)({}),
+      [`DELETE ${URL}items/21/`]: () => {
+        listed = [ROPE];
+        return empty(204)({});
+      },
+    });
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Tent from the inventory" }));
+
+    await waitFor(() =>
+      expect(itemTexts()).toEqual(["Rope: 60 m dynamic, owned by Ada Lovelace"]),
+    );
+    expect(backend.requests(`DELETE ${URL}items/21/`)).toHaveLength(1);
+  });
+
+  it("offers an admin only their own items that are not listed here", async () => {
+    withItems("admin");
+
+    await open();
+
+    expect(pickerOptions()).toEqual(["Axe", "Helmet"]);
+  });
+
+  it("tells apart two of the caller's items with the same name by their descriptions", async () => {
+    withItems("admin", {
+      "GET /api/items/": json(200, [
+        { id: 30, name: "Stove", description: "gas", inventories: [] },
+        { id: 31, name: "Stove", description: "", inventories: [] },
+      ]),
+    });
+
+    await open();
+
+    expect(pickerOptions()).toEqual(["Stove: gas", "Stove"]);
+  });
+
+  it("lists the chosen item and reloads the items and the picker", async () => {
+    let listed = [ROPE, TENT];
+    const backend = withItems("admin", {
+      [`GET ${URL}items/`]: () => json(200, listed)({}),
+      [`POST ${URL}items/`]: () => {
+        listed = [LISTED_HELMET, ROPE, TENT];
+        return json(201, LISTED_HELMET)({});
+      },
+    });
+    await open();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Item" }), { target: { value: "23" } });
+    fireEvent.click(screen.getByRole("button", { name: "List item" }));
+
+    await waitFor(() => expect(itemTexts()).toHaveLength(3));
+    expect(backend.requests(`POST ${URL}items/`)).toEqual([{ item_id: 23 }]);
+    expect(pickerOptions()).toEqual(["Axe"]);
+  });
+
+  it("names a refused item in the section alert", async () => {
+    withItems("admin", {
+      [`POST ${URL}items/`]: json(409, {
+        detail: "This item is already listed in this inventory.",
+      }),
+    });
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: "List item" }));
+
+    expect(await within(region("Items")).findByRole("alert")).toHaveTextContent(
+      '"Axe" was not listed. This item is already listed in this inventory.',
+    );
+  });
+
+  it("names a refused item the way its option is labelled", async () => {
+    withItems("admin", {
+      "GET /api/items/": json(200, [
+        { id: 30, name: "Stove", description: "gas", inventories: [] },
+        { id: 31, name: "Stove", description: "", inventories: [] },
+      ]),
+      [`POST ${URL}items/`]: json(409, { detail: "Not today." }),
+    });
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: "List item" }));
+
+    expect(await within(region("Items")).findByRole("alert")).toHaveTextContent(
+      '"Stove: gas" was not listed. Not today.',
+    );
+  });
+
+  it("clears an invite refusal when another action on the page succeeds", async () => {
+    withItems("admin", {
+      [`POST ${URL}invites/`]: json(400, { user_id: ["You can invite only your connections."] }),
+      [`POST ${URL}items/`]: json(201, LISTED_HELMET),
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    expect(await within(region("Pending invites")).findByRole("alert")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "List item" }));
+
+    await waitFor(() => expect(within(region("Pending invites")).queryByRole("alert")).toBeNull());
+  });
+
+  it.each([
+    ["every item is listed here", [MY_ITEMS[2]]],
+    ["the user has no items", []],
+  ])("links to My gear when %s", async (_, mine) => {
+    withItems("admin", { "GET /api/items/": json(200, mine) });
+
+    await open();
+
+    const items = region("Items");
+    expect(within(items).getByText(/No items to list\./)).toBeInTheDocument();
+    expect(within(items).getByRole("link", { name: "My gear" })).toHaveAttribute("href", "/gear");
+    expect(screen.queryByRole("combobox", { name: "Item" })).toBeNull();
+  });
+
+  it("moves focus to the empty-state paragraph when the last item is listed", async () => {
+    let listed = [ROPE, TENT];
+    withItems("admin", {
+      "GET /api/items/": json(200, [HELMET, MY_ITEMS[2]]),
+      [`GET ${URL}items/`]: () => json(200, listed)({}),
+      [`POST ${URL}items/`]: () => {
+        listed = [LISTED_HELMET, ROPE, TENT];
+        return json(201, listed[0])({});
+      },
+    });
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: "List item" }));
+
+    const empty = await within(region("Items")).findByText(/No items to list/);
+    await waitFor(() => expect(empty).toHaveFocus());
   });
 });
 

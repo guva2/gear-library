@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth } from "../auth";
@@ -16,6 +16,7 @@ import {
   type PersonName,
   type Role,
 } from "../inventories";
+import { describeItem, type Item, type ListedItem } from "../items";
 import { useLoad } from "../load";
 import { formatPhoneNumber } from "../phone";
 
@@ -28,12 +29,15 @@ interface PageData {
   invites: InventoryInvite[];
   /** The caller's accepted connections. Loaded only for admins and owners. */
   connections: Connection[];
+  listed: ListedItem[];
+  /** The caller's own items. Loaded only for admins and owners. */
+  myItems: Item[];
 }
 
 async function loadPage(base: string, signal: AbortSignal): Promise<PageData> {
   const inventory = await getJson<Inventory>(base, signal);
   const staff = hasRole(inventory.role, "admin");
-  const [people, invites, connections] = await Promise.all([
+  const [people, invites, connections, listed, myItems] = await Promise.all([
     staff
       ? getJson<Member[]>(`${base}members/`, signal).then(
           (members): People => ({ staff: true, members }),
@@ -43,8 +47,10 @@ async function loadPage(base: string, signal: AbortSignal): Promise<PageData> {
         ),
     staff ? getJson<InventoryInvite[]>(`${base}invites/`, signal) : [],
     staff ? getJson<Connection[]>("/api/connections/", signal) : [],
+    getJson<ListedItem[]>(`${base}items/`, signal),
+    staff ? getJson<Item[]>("/api/items/", signal) : [],
   ]);
-  return { inventory, people, invites, connections };
+  return { inventory, people, invites, connections, listed, myItems };
 }
 
 type Method = "POST" | "PATCH" | "DELETE";
@@ -83,6 +89,8 @@ function InventoryView({ base }: { base: string }) {
   const [page, reload] = useLoad((signal) => loadPage(base, signal));
   const [errors, setErrors] = useState<FieldErrors>({});
   const [refusal, setRefusal] = useState<FieldErrors>({});
+  // Counts the changes sent, so the pickers can drop messages left by an earlier one.
+  const [sent, setSent] = useState(0);
 
   /**
    * Sends a change. Returns the failure for the caller to show, or `null` when it succeeded.
@@ -92,6 +100,7 @@ function InventoryView({ base }: { base: string }) {
   const send: Send = async (path, method, { body, fields = [] } = {}) => {
     setRefusal({});
     setErrors({});
+    setSent((count) => count + 1);
     try {
       const response = await apiFetch(path, { method, body });
       if (response.ok) return null;
@@ -124,8 +133,9 @@ function InventoryView({ base }: { base: string }) {
     return <p role="alert">Could not load the inventory.</p>;
   }
 
-  const { inventory, people, invites, connections } = page.data;
+  const { inventory, people, invites, connections, listed, myItems } = page.data;
   const isOwner = inventory.role === "owner";
+  const myItemIds = new Set(myItems.map((item) => item.id));
   return (
     <>
       <h2>{inventory.name}</h2>
@@ -157,11 +167,22 @@ function InventoryView({ base }: { base: string }) {
           invites={invites}
           invitable={invitable(connections, people.members, invites)}
           send={send}
+          sent={sent}
           base={base}
           reload={reload}
           onRevoke={(invite) => act(`/api/invites/${invite.id}/revoke/`, "POST")}
         />
       )}
+      <Items
+        listed={listed}
+        listable={people.staff ? listable(myItems, listed) : null}
+        removable={(item) => people.staff && (isOwner || myItemIds.has(item.id))}
+        send={send}
+        sent={sent}
+        base={base}
+        reload={reload}
+        onRemove={(item) => act(`${base}items/${item.id}/`, "DELETE")}
+      />
       <p>
         <button type="button" onClick={() => leaveOrDelete(`${base}members/${user?.id}/`)}>
           Leave inventory
@@ -284,55 +305,15 @@ interface InvitesProps {
   invites: InventoryInvite[];
   invitable: Connection["user"][];
   send: Send;
+  sent: number;
   base: string;
   reload: () => void;
   onRevoke: (invite: InventoryInvite) => void;
 }
 
-function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesProps) {
-  const [errors, setErrors] = useState<FieldErrors>({});
-  const section = useRef<HTMLElement>(null);
-  const empty = useRef<HTMLParagraphElement>(null);
-  const hadForm = useRef(invitable.length > 0);
-
-  // The form unmounts when the last person leaves the picker; focus would drop to the page.
-  useEffect(() => {
-    const hasForm = invitable.length > 0;
-    if (hadForm.current && !hasForm) {
-      (section.current?.querySelector<HTMLElement>('[role="alert"]') ?? empty.current)?.focus();
-    }
-    hadForm.current = hasForm;
-  }, [invitable.length]);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const userId = Number(new FormData(form).get("user_id"));
-    const failed = await send(`${base}invites/`, "POST", {
-      body: { user_id: userId },
-      fields: ["user_id"],
-    });
-    // A 400 or 409 means this person was not invited. They may leave the picker on reload,
-    // so the message names them and sits at section level instead of beside whoever the
-    // select falls back to. After a 5xx or no response the invite may have gone through,
-    // so the message stands alone and a network failure reloads to show the pending list.
-    const refused = invitable.find((user) => user.id === userId);
-    const reasons = [...(failed?.errors.user_id ?? []), ...(failed?.errors.form ?? [])];
-    const notInvited = failed?.status === 400 || failed?.status === 409;
-    setErrors(
-      notInvited && reasons.length > 0
-        ? {
-            form: [
-              `${refused ? fullName(refused) : "That person"} was not invited. ${reasons.join(" ")}`,
-            ],
-          }
-        : (failed?.errors ?? {}),
-    );
-    if (!failed || failed.status === null) reload();
-  }
-
+function Invites({ invites, invitable, send, sent, base, reload, onRevoke }: InvitesProps) {
   return (
-    <section ref={section} aria-labelledby="invites">
+    <section aria-labelledby="invites">
       <h3 id="invites">Pending invites</h3>
       {invites.length === 0 ? (
         <p>No pending invites.</p>
@@ -357,28 +338,203 @@ function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesPr
           ))}
         </ul>
       )}
+      <Picker
+        options={invitable.map((user) => ({
+          id: user.id,
+          name: fullName(user),
+          label: [fullName(user), formatPhoneNumber(user.phone_number)].join(", "),
+        }))}
+        field="user_id"
+        label="Connection"
+        action="Invite"
+        notDone="was not invited"
+        unknown="That person"
+        empty={
+          <>
+            No connections to invite. Find people in{" "}
+            <Link to="/connections">My connections</Link>.
+          </>
+        }
+        path={`${base}invites/`}
+        send={send}
+        sent={sent}
+        reload={reload}
+      />
+    </section>
+  );
+}
+
+/** The caller's items that are not listed in this inventory. */
+function listable(myItems: Item[], listed: ListedItem[]): Item[] {
+  const listedIds = new Set(listed.map((item) => item.id));
+  return myItems.filter((item) => !listedIds.has(item.id));
+}
+
+interface ItemsProps {
+  listed: ListedItem[];
+  /** The items the caller may list here, or `null` for a `member`, who lists nothing. */
+  listable: Item[] | null;
+  removable: (item: ListedItem) => boolean;
+  send: Send;
+  sent: number;
+  base: string;
+  reload: () => void;
+  onRemove: (item: ListedItem) => void;
+}
+
+function Items({ listed, listable, removable, send, sent, base, reload, onRemove }: ItemsProps) {
+  return (
+    <section aria-labelledby="items">
+      <h3 id="items">Items</h3>
+      {listed.length === 0 ? (
+        <p>No items listed yet.</p>
+      ) : (
+        <ul>
+          {listed.map((item) => (
+            <li key={item.id}>
+              <span>{`${describeItem(item)}, owned by ${fullName(item.owner)}`}</span>
+              {removable(item) && (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${item.name} from the inventory`}
+                    onClick={() => onRemove(item)}
+                  >
+                    Remove
+                  </button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {listable && (
+        <Picker
+          options={listable.map((item) => ({
+            id: item.id,
+            name: `"${describeItem(item)}"`,
+            label: describeItem(item),
+          }))}
+          field="item_id"
+          label="Item"
+          action="List item"
+          notDone="was not listed"
+          unknown="That item"
+          empty={
+            <>
+              No items to list. Add gear in <Link to="/gear">My gear</Link>.
+            </>
+          }
+          path={`${base}items/`}
+          send={send}
+          sent={sent}
+          reload={reload}
+        />
+      )}
+    </section>
+  );
+}
+
+interface PickerOption {
+  id: number;
+  /** What a refusal message calls the option. */
+  name: string;
+  label: string;
+}
+
+interface PickerProps {
+  options: PickerOption[];
+  /** The body field that carries the chosen option's id. */
+  field: string;
+  label: string;
+  action: string;
+  /** Follows the option's name in a refusal, such as "was not invited". */
+  notDone: string;
+  /** Stands in for the name of an option that is no longer offered. */
+  unknown: string;
+  /** Shown instead of the form when there are no options. */
+  empty: ReactNode;
+  path: string;
+  send: Send;
+  /** The page's count of changes sent. A change from elsewhere on the page clears the errors. */
+  sent: number;
+  reload: () => void;
+}
+
+/** A select of options and a button that POSTs the chosen one's id to `path`. */
+function Picker({
+  options,
+  field,
+  label,
+  action,
+  notDone,
+  unknown,
+  empty,
+  path,
+  send,
+  sent,
+  reload,
+}: PickerProps) {
+  const [errors, setErrors] = useState<FieldErrors>({});
+  useEffect(() => setErrors({}), [sent]);
+  const container = useRef<HTMLDivElement>(null);
+  const emptyState = useRef<HTMLParagraphElement>(null);
+  const hadForm = useRef(options.length > 0);
+
+  // The form unmounts when the last option leaves the picker; focus would drop to the page.
+  useEffect(() => {
+    const hasForm = options.length > 0;
+    if (hadForm.current && !hasForm) {
+      (
+        container.current?.querySelector<HTMLElement>('[role="alert"]') ?? emptyState.current
+      )?.focus();
+    }
+    hadForm.current = hasForm;
+  }, [options.length]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const id = Number(new FormData(event.currentTarget).get(field));
+    const failed = await send(path, "POST", { body: { [field]: id }, fields: [field] });
+    // A 400 or 409 means the chosen option was refused. It may leave the picker on reload,
+    // so the message names it and sits above the picker instead of beside whichever option
+    // the select falls back to. After a 5xx or no response the change may have gone
+    // through, so the message stands alone and a network failure reloads to show it.
+    const refused = options.find((option) => option.id === id);
+    const reasons = [...(failed?.errors[field] ?? []), ...(failed?.errors.form ?? [])];
+    const refusal = failed?.status === 400 || failed?.status === 409;
+    setErrors(
+      refusal && reasons.length > 0
+        ? { form: [`${refused ? refused.name : unknown} ${notDone}. ${reasons.join(" ")}`] }
+        : (failed?.errors ?? {}),
+    );
+    if (!failed || failed.status === null) reload();
+  }
+
+  return (
+    <div ref={container}>
       <FormErrors errors={errors} />
-      {invitable.length === 0 ? (
-        <p ref={empty} tabIndex={-1}>
-          No connections to invite. Find people in{" "}
-          <Link to="/connections">My connections</Link>.
+      {options.length === 0 ? (
+        <p ref={emptyState} tabIndex={-1}>
+          {empty}
         </p>
       ) : (
         <form onSubmit={submit} noValidate>
           <p>
-            <label htmlFor="user_id">Connection</label>{" "}
-            <select id="user_id" name="user_id">
-              {invitable.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {[fullName(user), formatPhoneNumber(user.phone_number)].join(", ")}
+            <label htmlFor={field}>{label}</label>{" "}
+            <select id={field} name={field}>
+              {options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
                 </option>
               ))}
             </select>{" "}
-            <button type="submit">Invite</button>
+            <button type="submit">{action}</button>
           </p>
         </form>
       )}
-    </section>
+    </div>
   );
 }
 

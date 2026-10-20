@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import Membership, Role
+from .models import InventoryItem, Item, Membership, Role
 from .phone import normalize_phone_number
 
 User = get_user_model()
@@ -140,3 +140,44 @@ class SentRequestSerializer(_ConnectionSerializer):
     so sending and cancelling a request does not reveal whose number it is."""
 
     person_serializer = PersonNumberSerializer
+
+
+class ItemFieldsSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=64)
+    description = serializers.CharField(max_length=512, allow_blank=True, required=False)
+
+
+class ListedInSerializer(serializers.Serializer):
+    """An inventory an item is listed in."""
+
+    id = serializers.IntegerField(source="inventory.id", read_only=True)
+    name = serializers.CharField(source="inventory.name", read_only=True)
+
+
+class ItemSerializer(serializers.ModelSerializer):
+    """An item as its owner sees it, with the inventories it is listed in."""
+
+    inventories = ListedInSerializer(source="listings", many=True, read_only=True)
+
+    class Meta:
+        model = Item
+        fields = ["id", "name", "description", "inventories"]
+        read_only_fields = fields
+
+
+class ListedItemSerializer(serializers.ModelSerializer):
+    """A listed item as the inventory's members see it. `id` is the item's id."""
+
+    id = serializers.IntegerField(source="item.id", read_only=True)
+    name = serializers.CharField(source="item.name", read_only=True)
+    description = serializers.CharField(source="item.description", read_only=True)
+    owner = PersonNameSerializer(source="item.owner", read_only=True)
+
+    class Meta:
+        model = InventoryItem
+        fields = ["id", "name", "description", "owner"]
+        read_only_fields = fields
+
+
+class ItemIdSerializer(serializers.Serializer):
+    item_id = serializers.IntegerField()

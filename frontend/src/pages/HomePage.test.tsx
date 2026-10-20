@@ -35,6 +35,18 @@ describe("my inventories", () => {
     expect(screen.getByText("Signed in as Ada Lovelace")).toBeInTheDocument();
   });
 
+  it("links to My gear and My connections", async () => {
+    signedIn();
+
+    renderAt("/");
+
+    expect(await screen.findByRole("link", { name: "My gear" })).toHaveAttribute("href", "/gear");
+    expect(screen.getByRole("link", { name: "My connections" })).toHaveAttribute(
+      "href",
+      "/connections",
+    );
+  });
+
   it("says so when the user has no inventories or invites", async () => {
     signedIn();
 
@@ -60,6 +72,7 @@ describe("my inventories", () => {
       "GET /api/inventories/9/": json(200, { id: 9, name: "Kayaks", role: "owner" }),
       "GET /api/inventories/9/members/": json(200, []),
       "GET /api/inventories/9/invites/": json(200, []),
+      "GET /api/inventories/9/items/": json(200, []),
     });
     renderAt("/");
     await screen.findByText("You are not in any inventory yet.");

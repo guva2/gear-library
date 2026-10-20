@@ -8,6 +8,7 @@ PHONE_NUMBER_PATTERN = r"^[0-9]{10}$"
 
 ONE_MEMBERSHIP_PER_USER = "gear_library_membership_one_per_user"
 ONE_CONNECTION_PER_PAIR = "gear_library_connection_one_per_pair"
+ONE_LISTING_PER_ITEM = "gear_library_inventoryitem_one_per_item"
 
 
 class UserManager(BaseUserManager):
@@ -196,3 +197,26 @@ class Connection(models.Model):
     def other_user(self, user):
         """The user of the pair who is not `user`."""
         return self.second_user if self.first_user_id == user.id else self.first_user
+
+
+class Item(models.Model):
+    owner = models.ForeignKey(User, on_delete=models.PROTECT, related_name="items")
+    name = models.CharField(max_length=64)
+    description = models.CharField(max_length=512, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
+class InventoryItem(models.Model):
+    """An item listed in an inventory."""
+
+    inventory = models.ForeignKey(Inventory, on_delete=models.CASCADE, related_name="listings")
+    item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name="listings")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["inventory", "item"], name=ONE_LISTING_PER_ITEM),
+        ]
