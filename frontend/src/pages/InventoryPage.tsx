@@ -16,7 +16,7 @@ import {
   type PersonName,
   type Role,
 } from "../inventories";
-import { describeItem, type Item, type ListedItem } from "../items";
+import { describeItem, LOAN_STATUS_LABELS, type Item, type ListedItem } from "../items";
 import { useLoad } from "../load";
 import { formatPhoneNumber } from "../phone";
 
@@ -177,11 +177,13 @@ function InventoryView({ base }: { base: string }) {
         listed={listed}
         listable={people.staff ? listable(myItems, listed) : null}
         removable={(item) => people.staff && (isOwner || myItemIds.has(item.id))}
+        owned={(item) => myItemIds.has(item.id)}
         send={send}
         sent={sent}
         base={base}
         reload={reload}
         onRemove={(item) => act(`${base}items/${item.id}/`, "DELETE")}
+        onLoanChange={(path, body) => act(path, "POST", body)}
       />
       <p>
         <button type="button" onClick={() => leaveOrDelete(`${base}members/${user?.id}/`)}>
@@ -370,19 +372,103 @@ function listable(myItems: Item[], listed: ListedItem[]): Item[] {
   return myItems.filter((item) => !listedIds.has(item.id));
 }
 
+/** The loan status, with who has requested or borrowed the item when the caller may see it. */
+function loanText(item: ListedItem): string {
+  const who = item.borrowed_by_me
+    ? "you"
+    : item.borrower &&
+      `${fullName(item.borrower)}, ${formatPhoneNumber(item.borrower.phone_number)}`;
+  if (!who) return LOAN_STATUS_LABELS[item.loan_status];
+  return item.loan_status === "requested" ? `Requested by ${who}` : `On loan to ${who}`;
+}
+
+interface LoanButtonsProps {
+  item: ListedItem;
+  owned: boolean;
+  base: string;
+  onLoanChange: (path: string, body?: unknown) => void;
+}
+
+/**
+ * The loan changes the caller may make. Approve, decline and mark returned send the
+ * borrower the page showed.
+ */
+function LoanButtons({ item, owned, base, onLoanChange }: LoanButtonsProps) {
+  const path = `${base}items/${item.id}/`;
+  const buttons: { label: string; name: string; onClick: () => void }[] = [];
+  const asStaff = item.borrower && !item.borrowed_by_me ? { borrower_id: item.borrower.id } : null;
+  if (item.loan_status === "available" && !owned) {
+    buttons.push({
+      label: "Request",
+      name: `Request ${item.name}`,
+      onClick: () => onLoanChange(`${path}borrow/`),
+    });
+  }
+  if (item.loan_status === "requested" && item.borrowed_by_me) {
+    buttons.push({
+      label: "Cancel request",
+      name: `Cancel request for ${item.name}`,
+      onClick: () => onLoanChange(`/api/borrowing/${item.id}/cancel/`),
+    });
+  }
+  if (item.loan_status === "requested" && asStaff) {
+    buttons.push(
+      {
+        label: "Approve",
+        name: `Approve request for ${item.name}`,
+        onClick: () => onLoanChange(`${path}approve/`, asStaff),
+      },
+      {
+        label: "Decline",
+        name: `Decline request for ${item.name}`,
+        onClick: () => onLoanChange(`${path}decline/`, asStaff),
+      },
+    );
+  }
+  if (item.loan_status === "on_loan" && asStaff) {
+    buttons.push({
+      label: "Mark returned",
+      name: `Mark ${item.name} returned`,
+      onClick: () => onLoanChange(`${path}return/`, asStaff),
+    });
+  }
+  return buttons.map((button) => (
+    <span key={button.name}>
+      {" "}
+      <button type="button" aria-label={button.name} onClick={button.onClick}>
+        {button.label}
+      </button>
+    </span>
+  ));
+}
+
 interface ItemsProps {
   listed: ListedItem[];
   /** The items the caller may list here, or `null` for a `member`, who lists nothing. */
   listable: Item[] | null;
   removable: (item: ListedItem) => boolean;
+  /** True for the caller's own items. */
+  owned: (item: ListedItem) => boolean;
   send: Send;
   sent: number;
   base: string;
   reload: () => void;
   onRemove: (item: ListedItem) => void;
+  onLoanChange: (path: string, body?: unknown) => void;
 }
 
-function Items({ listed, listable, removable, send, sent, base, reload, onRemove }: ItemsProps) {
+function Items({
+  listed,
+  listable,
+  removable,
+  owned,
+  send,
+  sent,
+  base,
+  reload,
+  onRemove,
+  onLoanChange,
+}: ItemsProps) {
   return (
     <section aria-labelledby="items">
       <h3 id="items">Items</h3>
@@ -392,7 +478,14 @@ function Items({ listed, listable, removable, send, sent, base, reload, onRemove
         <ul>
           {listed.map((item) => (
             <li key={item.id}>
-              <span>{`${describeItem(item)}, owned by ${fullName(item.owner)}`}</span>
+              <span>{`${describeItem(item)}, owned by ${fullName(item.owner)}`}</span>{" "}
+              <span>{loanText(item)}</span>
+              <LoanButtons
+                item={item}
+                owned={owned(item)}
+                base={base}
+                onLoanChange={onLoanChange}
+              />
               {removable(item) && (
                 <>
                   {" "}

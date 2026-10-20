@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { Confirmation, Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
-import { getJson } from "../inventories";
-import { describeItem, type Item } from "../items";
+import { fullName, getJson } from "../inventories";
+import { describeItem, type BorrowedItem, type Item } from "../items";
 import { useLoad } from "../load";
+import { formatPhoneNumber } from "../phone";
 
 const FIELDS = ["name", "description"] as const;
 
@@ -18,14 +19,35 @@ function listedIn(item: Item): string {
   return `Listed in ${item.inventories.map((inventory) => inventory.name).join(", ")}.`;
 }
 
+function loanState(item: Item): string {
+  if (!item.borrower) return "Available.";
+  const who = `${fullName(item.borrower)}, ${formatPhoneNumber(item.borrower.phone_number)}`;
+  const state = item.loan_status === "requested" ? `Requested by ${who}` : `On loan to ${who}`;
+  return item.loan_inventory ? `${state}, through ${item.loan_inventory.name}.` : `${state}.`;
+}
+
+interface PageData {
+  items: Item[];
+  borrowed: BorrowedItem[];
+}
+
+async function loadPage(signal: AbortSignal): Promise<PageData> {
+  const [items, borrowed] = await Promise.all([
+    getJson<Item[]>("/api/items/", signal),
+    getJson<BorrowedItem[]>("/api/borrowing/", signal),
+  ]);
+  return { items, borrowed };
+}
+
 export default function GearPage() {
-  const [page, reload] = useLoad((signal) => getJson<Item[]>("/api/items/", signal));
+  const [page, reload] = useLoad(loadPage);
   const [errors, setErrors] = useState<FieldErrors>({});
 
-  async function remove(item: Item) {
+  /** Sends a change, shows a refusal at the top of the page, and reloads either way. */
+  async function change(path: string, method: "POST" | "DELETE", body?: unknown) {
     setErrors({});
     try {
-      const response = await apiFetch(`/api/items/${item.id}/`, { method: "DELETE" });
+      const response = await apiFetch(path, { method, body });
       if (!response.ok) setErrors(await readErrors(response, []));
       reload();
     } catch {
@@ -44,17 +66,26 @@ export default function GearPage() {
       {page.status === "error" && <p role="alert">Could not load your gear.</p>}
       {page.status === "ok" && (
         <ItemList
-          items={page.data}
+          items={page.data.items}
           reload={reload}
           onSubmit={() => setErrors({})}
           onGone={(errors) => {
             setErrors(errors);
             reload();
           }}
-          onDelete={remove}
+          onDelete={(item) => change(`/api/items/${item.id}/`, "DELETE")}
+          onReturn={(item, borrowerId) =>
+            change(`/api/items/${item.id}/return/`, "POST", { borrower_id: borrowerId })
+          }
         />
       )}
       <AddItem reload={reload} onSubmit={() => setErrors({})} />
+      {page.status === "ok" && (
+        <Borrowing
+          borrowed={page.data.borrowed}
+          onCancel={(item) => change(`/api/borrowing/${item.id}/cancel/`, "POST")}
+        />
+      )}
     </>
   );
 }
@@ -67,9 +98,11 @@ interface ItemListProps {
   /** Called with the errors of an edit refused because the item no longer exists. */
   onGone: (errors: FieldErrors) => void;
   onDelete: (item: Item) => void;
+  /** Called with the borrower the page showed. */
+  onReturn: (item: Item, borrowerId: number) => void;
 }
 
-function ItemList({ items, reload, onSubmit, onGone, onDelete }: ItemListProps) {
+function ItemList({ items, reload, onSubmit, onGone, onDelete, onReturn }: ItemListProps) {
   const [editing, setEditing] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<Item | null>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -116,6 +149,7 @@ function ItemList({ items, reload, onSubmit, onGone, onDelete }: ItemListProps) 
                 <>
                   <p>{describeItem(item)}</p>
                   <p>{listedIn(item)}</p>
+                  <p>{loanState(item)}</p>
                   <p>
                     <button
                       type="button"
@@ -132,6 +166,18 @@ function ItemList({ items, reload, onSubmit, onGone, onDelete }: ItemListProps) 
                     >
                       Delete
                     </button>
+                    {item.loan_status === "on_loan" && item.borrower && (
+                      <>
+                        {" "}
+                        <button
+                          type="button"
+                          aria-label={`Mark ${item.name} returned`}
+                          onClick={() => item.borrower && onReturn(item, item.borrower.id)}
+                        >
+                          Mark returned
+                        </button>
+                      </>
+                    )}
                   </p>
                 </>
               )}
@@ -240,6 +286,50 @@ function AddItem({ reload, onSubmit }: { reload: () => void; onSubmit: () => voi
         <Field name="description" label="Description" errors={errors} required={false} />
         <button type="submit">Add</button>
       </form>
+    </section>
+  );
+}
+
+interface BorrowingProps {
+  borrowed: BorrowedItem[];
+  onCancel: (item: BorrowedItem) => void;
+}
+
+function borrowedText(item: BorrowedItem): string {
+  const owned = `${describeItem(item)}, owned by ${fullName(item.owner)}.`;
+  const through = item.loan_inventory ? ` through ${item.loan_inventory.name}` : "";
+  const state = item.loan_status === "requested" ? "Requested" : "On loan to you";
+  return `${owned} ${state}${through}.`;
+}
+
+/** The signed-in user's pending requests and the items they hold. */
+function Borrowing({ borrowed, onCancel }: BorrowingProps) {
+  return (
+    <section aria-labelledby="borrowing">
+      <h3 id="borrowing">Borrowing</h3>
+      {borrowed.length === 0 ? (
+        <p>You have not requested or borrowed anything.</p>
+      ) : (
+        <ul>
+          {borrowed.map((item) => (
+            <li key={item.id}>
+              <span>{borrowedText(item)}</span>
+              {item.loan_status === "requested" && (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    aria-label={`Cancel request for ${item.name}`}
+                    onClick={() => onCancel(item)}
+                  >
+                    Cancel request
+                  </button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

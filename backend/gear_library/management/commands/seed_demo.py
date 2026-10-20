@@ -8,6 +8,7 @@ from gear_library.models import (
     Inventory,
     InventoryItem,
     Item,
+    LoanStatus,
     Membership,
     MembershipStatus,
     Role,
@@ -63,12 +64,19 @@ DEMO_ITEMS = [
     (SAM, "Chalk bag", "", []),
 ]
 
+# (owner, item name, borrower, loan inventory name, status). Applied only to an item created
+# in the same run, while it is listed in that inventory and the borrower is a member there.
+DEMO_LOANS = [
+    (AVERY, "Climbing rope", SAM, "Climbing Club", LoanStatus.REQUESTED),
+    (JORDAN, "Two-person tent", SAM, "Camping Crew", LoanStatus.ON_LOAN),
+]
+
 
 class Command(BaseCommand):
     help = (
-        "Create the demo users, their inventories, connections and items. Users, demo "
-        "inventories and items that already exist, and pairs that already have a "
-        "connection or a request, are left unchanged."
+        "Create the demo users, their inventories, connections, items and loans. Users, "
+        "demo inventories and items that already exist, and pairs that already have a "
+        "connection or a request, are left unchanged, and existing items get no loan."
     )
 
     @transaction.atomic
@@ -138,11 +146,13 @@ class Command(BaseCommand):
         self.stdout.write(f"Created {created} demo connections; {existing} already existed.")
 
         created = 0
+        new_items = {}
         for owner_phone, name, description, listed_in in DEMO_ITEMS:
             owner = users[owner_phone]
             if Item.objects.filter(owner=owner, name=name).exists():
                 continue
             item = Item.objects.create(owner=owner, name=name, description=description)
+            new_items[owner_phone, name] = item
             for inventory_name in listed_in:
                 inventory_id = inventories[inventory_name]
                 if Membership.objects.active().filter(
@@ -152,3 +162,21 @@ class Command(BaseCommand):
             created += 1
         existing = len(DEMO_ITEMS) - created
         self.stdout.write(f"Created {created} demo items; {existing} already existed.")
+
+        created = 0
+        for owner_phone, name, borrower_phone, inventory_name, status in DEMO_LOANS:
+            item = new_items.get((owner_phone, name))
+            inventory_id = inventories[inventory_name]
+            if (
+                item is None
+                or not item.listings.filter(inventory_id=inventory_id).exists()
+                or not Membership.objects.active()
+                .filter(inventory_id=inventory_id, user=users[borrower_phone])
+                .exists()
+            ):
+                continue
+            Item.objects.filter(pk=item.pk).update(
+                loan_status=status, borrower=users[borrower_phone], loan_inventory_id=inventory_id
+            )
+            created += 1
+        self.stdout.write(f"Created {created} demo loans and borrow requests.")

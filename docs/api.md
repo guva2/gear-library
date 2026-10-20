@@ -362,7 +362,7 @@ cancelling an accepted connection is a `409`
 | `GET` | `/api/items/` | Logged in. The caller's own items. | |
 | `POST` | `/api/items/` | Logged in. The caller owns the new item. | `400` |
 | `PATCH` | `/api/items/{id}/` | The item's owner. | `400`, `404` |
-| `DELETE` | `/api/items/{id}/` | The item's owner. Deletes it and its listings. | `404`. From M9, `409`: on loan. |
+| `DELETE` | `/api/items/{id}/` | The item's owner. Deletes it and its listings. | `404`. `409`: on loan. |
 
 Under `/api/items/{id}/`, an item that does not exist and an item the caller does not own
 are both `404` `{"detail": "Item not found."}`, even for a member who sees the item in an
@@ -378,6 +378,9 @@ What the `/api/items/` endpoints return. `GET` returns a list sorted by name.
 | `name` | string | 1 to 64 characters. |
 | `description` | string | 0 to 512 characters. `""` when there is none. |
 | `inventories` | list | The inventories the item is listed in, sorted by name. Each has `id` and `name`. |
+| `loan_status` | string | `available`, `requested` or `on_loan`. |
+| `borrower` | object or `null` | The requester while `requested`, the borrower while `on_loan`: `id`, `first_name`, `last_name` and `phone_number`. `null` while `available`. |
+| `loan_inventory` | object or `null` | The inventory the request was made through: `id` and `name`. `null` while `available`, and for a loan whose inventory was deleted. |
 
 #### `POST /api/items/` and `PATCH /api/items/{id}/`
 
@@ -390,7 +393,9 @@ What the `/api/items/` endpoints return. `GET` returns a list sorted by name.
 [Item](#item), and `PATCH` returns `200` with the changed [Item](#item). `400` errors are
 keyed by field.
 
-`DELETE` returns `204` with no body.
+`DELETE` returns `204` with no body. An item on loan is a `409`
+`{"detail": "This item is on loan. It can be deleted once it is returned."}`. Deleting a
+requested item cancels the request.
 
 ### Listings
 
@@ -414,6 +419,9 @@ name.
 | `name` | string | |
 | `description` | string | `""` when there is none. |
 | `owner` | object | The item's owner: `first_name` and `last_name` only, so a `member` learns no user id. The owner is always an admin or owner of the inventory. |
+| `loan_status` | string | `available`, `requested` or `on_loan`, whichever inventory the request was made through. |
+| `borrowed_by_me` | boolean | `true` when the caller is the requester or the borrower. |
+| `borrower` | object or `null` | For admins and owners, while the item is requested or on loan through this inventory: the requester or borrower's `id`, `first_name`, `last_name` and `phone_number`. `null` otherwise, and always `null` for a `member`. |
 
 #### `POST /api/inventories/{id}/items/`
 
@@ -451,17 +459,75 @@ not listed in the inventory is a `404`
 
 ## Borrowing (M9)
 
-A request is made through one inventory. "Loan inventory" below is that inventory.
-The approve, decline, cancel and return bodies carry what the caller saw, and the `409`
-"the request changed" check compares it with the item. Which fields it compares, and the
-owner's mark-returned exception, are in the Concurrency section of `schema.md`.
+A borrow request is made through one inventory, the item's loan inventory. One user at a
+time can request an item, across all the inventories it is listed in. The rules are in
+[`schema.md`](schema.md) under "Borrowing".
 
 | Method | Path | Who | Main errors |
 |---|---|---|---|
-| `POST` | `/api/inventories/{id}/items/{item_id}/borrow/` | Member, for an item listed there that they do not own. | `403`, `404`, `409`: not available. |
-| `GET` | `/api/inventories/{id}/requests/` | Admin. Pending requests made through the inventory. | `403`, `404` |
-| `GET` | `/api/loans/` | Logged in. Items the caller has requested or borrowed. | |
-| `POST` | `/api/items/{id}/approve/` | Admin of the loan inventory, other than the borrower. | `403`, `404`, `409`: the request changed. |
-| `POST` | `/api/items/{id}/decline/` | Admin of the loan inventory. | `403`, `404`, `409`: the request changed. |
-| `POST` | `/api/items/{id}/cancel/` | The borrower, while the request is pending. | `403`, `404`, `409`: not pending. |
-| `POST` | `/api/items/{id}/return/` | Admin of the loan inventory while the item is listed there, or the item's owner. Never the borrower. | `403`, `404`, `409`: not on loan. |
+| `POST` | `/api/inventories/{id}/items/{item_id}/borrow/` | Member, for an item listed there that they do not own. | `403`: own item. `404`. `409`: not available. |
+| `POST` | `/api/inventories/{id}/items/{item_id}/approve/` | Admin, for a request made through this inventory by someone else. | `400`, `403`, `404`, `409`: the request changed. |
+| `POST` | `/api/inventories/{id}/items/{item_id}/decline/` | Admin, for a request made through this inventory by someone else. | `400`, `403`, `404`, `409`: the request changed. |
+| `POST` | `/api/inventories/{id}/items/{item_id}/return/` | Admin, for a loan made through this inventory to someone else, while the item is listed there. | `400`, `403`, `404`, `409`: the loan changed. |
+| `POST` | `/api/items/{id}/return/` | The item's owner. | `400`, `404`, `409`: the loan changed. |
+| `GET` | `/api/borrowing/` | Logged in. Items the caller has requested or borrowed. | |
+| `POST` | `/api/borrowing/{item_id}/cancel/` | The requester, while the request is pending. | `404`, `409`: already approved. |
+
+Every action returns `204` with no body. The item's [Listed item](#listed-item) and
+[Item](#item) show the new state.
+
+### Requesting
+
+`POST /api/inventories/{id}/items/{item_id}/borrow/` takes no body. The caller becomes the
+requester and the inventory the loan inventory.
+
+- `403` `{"detail": "You cannot borrow your own item."}`.
+- `404` `{"detail": "This item is not listed in this inventory."}`.
+- `409` `{"detail": "This item has already been requested or is on loan."}`, whichever
+  inventory the earlier request was made through.
+
+### Approving, declining and marking returned
+
+`approve`, `decline` and `return` under `/api/inventories/{id}/items/{item_id}/`, and
+`POST /api/items/{id}/return/`, take the requester or borrower the caller saw:
+
+| Field | Type | |
+|---|---|---|
+| `borrower_id` | integer | Required. The `borrower.id` of the [Listed item](#listed-item) or [Item](#item). |
+
+`approve` makes a request a loan. `decline` and `return` make the item available. Under
+`/api/inventories/{id}/`, the access check comes before the body: a non-member gets `404`
+and a `member` gets `403` whatever they send. Under `/api/items/{id}/`, an item the caller
+does not own is a `404` `{"detail": "Item not found."}` before the body is read.
+
+- `400` `{"borrower_id": ["This field is required."]}`, or another field error.
+- `403` `{"detail": "You cannot approve or decline your own request."}` or
+  `{"detail": "You cannot mark your own loan returned."}` when `borrower_id` is the caller.
+- `404` `{"detail": "This item is not listed in this inventory."}`. The item's owner can
+  still mark it returned through `/api/items/{id}/return/`.
+- `409` `{"detail": "This request or loan changed. Try again."}` when the item is not
+  requested (`approve`, `decline`) or on loan (`return`) by `borrower_id` through this
+  inventory. Through `/api/items/{id}/return/`, the inventory does not need to match.
+
+### Borrowed item
+
+What `GET /api/borrowing/` returns, as a list sorted by name: the caller's pending
+requests and the items they hold. A loan stays in the list after the borrower leaves the
+inventory and after the inventory is deleted.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | The item's id. |
+| `name` | string | |
+| `description` | string | `""` when there is none. |
+| `loan_status` | string | `requested` or `on_loan`. |
+| `owner` | object | `first_name` and `last_name` only. |
+| `loan_inventory` | object or `null` | `id` and `name`. `null` when the inventory was deleted. |
+
+### `POST /api/borrowing/{item_id}/cancel/`
+
+No body. Cancels the caller's pending request.
+
+- `404` `{"detail": "Request not found."}` when the caller has not requested or borrowed
+  the item.
+- `409` `{"detail": "This request was approved, so it cannot be cancelled."}`.

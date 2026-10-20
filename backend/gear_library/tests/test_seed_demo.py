@@ -39,7 +39,17 @@ def snapshot():
                 "pk", "first_user", "second_user", "requested_by", "status"
             )
         ),
-        "items": set(Item.objects.values_list("pk", "owner", "name", "description")),
+        "items": set(
+            Item.objects.values_list(
+                "pk",
+                "owner",
+                "name",
+                "description",
+                "loan_status",
+                "borrower",
+                "loan_inventory",
+            )
+        ),
         "listings": set(InventoryItem.objects.values_list("pk", "inventory", "item")),
     }
 
@@ -125,6 +135,7 @@ def test_leaves_a_changed_demo_inventory_alone():
 def test_does_not_touch_an_inventory_with_a_demo_name_that_is_not_the_demo_one():
     seed()
     demo_names = set(Inventory.objects.values_list("name", flat=True))
+    Item.objects.end_loan()
     Inventory.objects.all().delete()
     stranger = User.objects.create_user(
         phone_number="5551239999", first_name="Real", last_name="Person"
@@ -250,3 +261,44 @@ def test_lists_a_new_demo_item_only_where_its_owner_is_still_an_admin_or_owner()
             inventory=listing.inventory_id, user=listing.item.owner_id
         )
         assert lister.role == "owner"
+
+
+@pytest.mark.django_db
+def test_leaves_one_request_pending_and_one_item_on_loan_through_inventories_of_the_borrower():
+    seed()
+
+    for status in ("requested", "on_loan"):
+        item = Item.objects.get(loan_status=status)
+        assert item.borrower != item.owner
+        assert item.listings.filter(inventory=item.loan_inventory).exists()
+        assert Membership.objects.active().filter(
+            inventory=item.loan_inventory, user=item.borrower
+        ).exists()
+
+
+@pytest.mark.django_db
+def test_leaves_a_changed_demo_loan_alone():
+    seed()
+    Item.objects.end_loan()
+
+    seed()
+
+    assert set(Item.objects.values_list("loan_status", flat=True)) == {"available"}
+
+
+@pytest.mark.django_db
+def test_lends_a_new_demo_item_only_while_the_borrower_is_a_member_where_it_is_listed():
+    seed()
+    Item.objects.all().delete()
+    Membership.objects.filter(role="member").delete()
+    Membership.objects.filter(role="admin").update(role="member")
+
+    seed()
+
+    assert not Item.objects.filter(loan_status="requested").exists()
+    assert Item.objects.filter(loan_status="on_loan").count() == 1
+    for item in Item.objects.exclude(loan_status="available"):
+        assert item.listings.filter(inventory=item.loan_inventory).exists()
+        assert Membership.objects.active().filter(
+            inventory=item.loan_inventory, user=item.borrower
+        ).exists()

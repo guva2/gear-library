@@ -83,3 +83,107 @@ def test_the_listing_foreign_keys_are_no_action_and_checked_at_commit(target):
             [InventoryItem._meta.db_table, target._meta.db_table],
         )
         assert cursor.fetchall() == [("a", True, True)]
+
+
+@pytest.fixture
+def bea():
+    return User.objects.create_user(phone_number="5551230002", first_name="Bea", last_name="M")
+
+
+def set_loan(item, **fields):
+    """Writes the loan columns with one UPDATE, bypassing every service check."""
+    with transaction.atomic():
+        Item.objects.filter(pk=item.pk).update(**fields)
+
+
+@pytest.mark.django_db
+class TestLoanColumns:
+    def test_a_new_item_is_available_with_no_borrower(self, item):
+        item.refresh_from_db()
+
+        assert (item.loan_status, item.borrower, item.loan_inventory) == ("available", None, None)
+
+    @pytest.mark.parametrize(
+        "status, with_borrower, with_inventory",
+        [
+            ("requested", True, True),
+            ("on_loan", True, True),
+            ("on_loan", True, False),
+            ("available", False, False),
+        ],
+    )
+    def test_allowed_loan_states(
+        self, item, bea, inventory, status, with_borrower, with_inventory
+    ):
+        set_loan(
+            item,
+            loan_status=status,
+            borrower=bea if with_borrower else None,
+            loan_inventory=inventory if with_inventory else None,
+        )
+
+        item.refresh_from_db()
+        assert item.loan_status == status
+
+    @pytest.mark.parametrize(
+        "status, with_borrower, with_inventory",
+        [
+            ("available", True, False),
+            ("available", False, True),
+            ("requested", True, False),
+            ("requested", False, True),
+            ("on_loan", False, True),
+            ("on_loan", False, False),
+        ],
+    )
+    def test_refused_loan_states(
+        self, item, bea, inventory, status, with_borrower, with_inventory
+    ):
+        with pytest.raises(IntegrityError, match="gear_library_item_loan_state"):
+            set_loan(
+                item,
+                loan_status=status,
+                borrower=bea if with_borrower else None,
+                loan_inventory=inventory if with_inventory else None,
+            )
+
+    def test_an_unknown_loan_status_is_refused(self, item):
+        # Postgres checks constraints in name order, and `loan_state` refuses it first.
+        with connection.cursor() as cursor:
+            cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+            cursor.execute(
+                f"ALTER TABLE {Item._meta.db_table} DROP CONSTRAINT gear_library_item_loan_state"
+            )
+        with pytest.raises(IntegrityError, match="gear_library_item_loan_status_valid"):
+            set_loan(item, loan_status="lost")
+
+    def test_the_owner_cannot_be_the_borrower(self, item, ada, inventory):
+        with pytest.raises(IntegrityError, match="gear_library_item_borrower_not_owner"):
+            set_loan(item, loan_status="on_loan", borrower=ada, loan_inventory=inventory)
+
+    def test_deleting_a_borrower_is_refused(self, item, bea):
+        set_loan(item, loan_status="on_loan", borrower=bea)
+
+        with pytest.raises(ProtectedError):
+            bea.delete()
+
+    def test_deleting_the_loan_inventory_keeps_the_loan(self, item, bea, inventory):
+        set_loan(item, loan_status="on_loan", borrower=bea, loan_inventory=inventory)
+
+        inventory.delete()
+
+        item.refresh_from_db()
+        assert (item.loan_status, item.borrower, item.loan_inventory) == ("on_loan", bea, None)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("column", ["borrower_id", "loan_inventory_id"])
+def test_the_loan_foreign_keys_are_no_action_and_checked_at_commit(column):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT confdeltype, condeferrable, condeferred FROM pg_constraint c"
+            " JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]"
+            " WHERE c.contype = 'f' AND c.conrelid = %s::regclass AND a.attname = %s",
+            [Item._meta.db_table, column],
+        )
+        assert cursor.fetchall() == [("a", True, True)]

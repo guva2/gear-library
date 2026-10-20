@@ -199,11 +199,70 @@ class Connection(models.Model):
         return self.second_user if self.first_user_id == user.id else self.first_user
 
 
+class LoanStatus(models.TextChoices):
+    AVAILABLE = "available"
+    REQUESTED = "requested"
+    ON_LOAN = "on_loan"
+
+
+class ItemQuerySet(models.QuerySet):
+    def end_loan(self):
+        """Makes the items available, with no borrower and no loan inventory."""
+        return self.update(loan_status=LoanStatus.AVAILABLE, borrower=None, loan_inventory=None)
+
+    def cancel_requests_through(self, inventory_id):
+        """Cancels the pending requests made through the inventory `inventory_id`."""
+        return self.filter(
+            loan_status=LoanStatus.REQUESTED, loan_inventory_id=inventory_id
+        ).end_loan()
+
+
 class Item(models.Model):
+    """A piece of gear. Its loan state is on this row: `borrower` is the requester while
+    `requested` and the borrower while `on_loan`, and `loan_inventory` is the inventory the
+    request was made through."""
+
     owner = models.ForeignKey(User, on_delete=models.PROTECT, related_name="items")
     name = models.CharField(max_length=64)
     description = models.CharField(max_length=512, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    borrower = models.ForeignKey(
+        User, on_delete=models.PROTECT, null=True, related_name="borrowing"
+    )
+    loan_inventory = models.ForeignKey(
+        Inventory, on_delete=models.SET_NULL, null=True, related_name="loans"
+    )
+    loan_status = models.CharField(
+        max_length=9, choices=LoanStatus.choices, default=LoanStatus.AVAILABLE
+    )
+
+    objects = ItemQuerySet.as_manager()
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(loan_status__in=LoanStatus.values),
+                name="gear_library_item_loan_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    loan_status=LoanStatus.AVAILABLE,
+                    borrower__isnull=True,
+                    loan_inventory__isnull=True,
+                )
+                | models.Q(
+                    loan_status=LoanStatus.REQUESTED,
+                    borrower__isnull=False,
+                    loan_inventory__isnull=False,
+                )
+                | models.Q(loan_status=LoanStatus.ON_LOAN, borrower__isnull=False),
+                name="gear_library_item_loan_state",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(borrower=models.F("owner")),
+                name="gear_library_item_borrower_not_owner",
+            ),
+        ]
 
     def __str__(self):
         return self.name
