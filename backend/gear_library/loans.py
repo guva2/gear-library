@@ -8,10 +8,9 @@ the state the caller saw: its loan status, its borrower and the inventory. When 
 matches, the item changed in the meantime and the change gets `Conflict`.
 
 Cancelling and the item owner's mark returned take no inventory lock. Each is one
-conditional update of the item row, on its borrower or on its owner. A pending request
-ends when its requester leaves the loan inventory or the item leaves it ("Borrowing" in
-`docs/schema.md`), so cancelling has no membership or listing to re-check. The owner
-closes a loan whatever became of its listing and loan inventory.
+conditional update of the item row, on its borrower or on its owner. Cancelling re-checks
+no membership or listing: "Borrowing" in `docs/schema.md` says when a pending request
+ends. The owner closes a loan whatever became of its listing and loan inventory.
 """
 
 from django.db import transaction
