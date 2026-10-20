@@ -1,11 +1,11 @@
 """Every borrow request and loan change a user makes.
 
 A request is made through an inventory, its loan inventory. Requesting, approving,
-declining and marking returned through an inventory lock the inventory row through
-`inventories.lock_as`, which re-reads the caller's membership, and then check that the item
-is listed there. Each change is then one conditional update of the item row that matches
-the state the caller saw: its loan status, its borrower and the inventory. When no row
-matches, the item changed in the meantime and the change gets `Conflict`.
+declining and marking returned through an inventory take the item's listing there, read
+with the inventory row locked by `inventories.lock_inventory`. Each change is then one
+conditional update of the item row that matches the state the caller saw: its loan status,
+its borrower and the inventory. When no row matches, the item changed in the meantime and
+the change gets `Conflict`.
 
 Cancelling and the item owner's mark returned take no inventory lock. Each is one
 conditional update of the item row, on its borrower or on its owner. Cancelling re-checks
@@ -13,13 +13,11 @@ no membership or listing: "Borrowing" in `docs/schema.md` says when a pending re
 ends. The owner closes a loan whatever became of its listing and loan inventory.
 """
 
-from django.db import transaction
 from rest_framework.exceptions import NotFound, PermissionDenied
 
 from .errors import Conflict
-from .inventories import lock_as
-from .items import ITEM_NOT_FOUND, get_listing
-from .models import Item, LoanStatus, Role
+from .items import ITEM_NOT_FOUND
+from .models import Item, LoanStatus
 
 OWN_ITEM = "You cannot borrow your own item."
 NOT_AVAILABLE = "This item has already been requested or is on loan."
@@ -30,62 +28,51 @@ REQUEST_NOT_FOUND = "Request not found."
 NOT_PENDING = "This request was approved, so it cannot be cancelled."
 
 
-def _listed_item(user_id, inventory_id, item_id, role):
-    """Locks the inventory, checks the caller's `role` there and returns the item listed
-    there."""
-    lock_as(user_id, inventory_id, role)
-    return get_listing(inventory_id, item_id).item
-
-
-@transaction.atomic
-def request_item(user, inventory_id, item_id):
-    """Requests the item `item_id` through the inventory, where the caller is a member."""
-    item = _listed_item(user.id, inventory_id, item_id, Role.MEMBER)
-    if item.owner_id == user.id:
+def request_item(user, listing):
+    """Requests the listed item through the listing's inventory, where the caller is a
+    member."""
+    if listing.item.owner_id == user.id:
         raise PermissionDenied(OWN_ITEM)
-    available = Item.objects.filter(pk=item.pk, loan_status=LoanStatus.AVAILABLE)
+    available = Item.objects.filter(pk=listing.item_id, loan_status=LoanStatus.AVAILABLE)
     if not available.update(
-        loan_status=LoanStatus.REQUESTED, borrower=user, loan_inventory_id=inventory_id
+        loan_status=LoanStatus.REQUESTED, borrower=user, loan_inventory_id=listing.inventory_id
     ):
         raise Conflict(NOT_AVAILABLE)
 
 
-def _through(inventory_id, item_id, status, borrower_id):
+def _through(listing, status, borrower_id):
     return Item.objects.filter(
-        pk=item_id, loan_status=status, borrower_id=borrower_id, loan_inventory_id=inventory_id
+        pk=listing.item_id,
+        loan_status=status,
+        borrower_id=borrower_id,
+        loan_inventory_id=listing.inventory_id,
     )
 
 
 # `borrower_id` below is the requester or borrower the caller saw. An admin or owner of the
-# inventory acts, and never on their own request or loan.
+# listing's inventory acts, and never on their own request or loan.
 
 
-@transaction.atomic
-def approve(user, inventory_id, item_id, borrower_id):
-    _listed_item(user.id, inventory_id, item_id, Role.ADMIN)
+def approve(user, listing, borrower_id):
     if borrower_id == user.id:
         raise PermissionDenied(OWN_REQUEST)
-    pending = _through(inventory_id, item_id, LoanStatus.REQUESTED, borrower_id)
+    pending = _through(listing, LoanStatus.REQUESTED, borrower_id)
     if not pending.update(loan_status=LoanStatus.ON_LOAN):
         raise Conflict(LOAN_CHANGED)
 
 
-@transaction.atomic
-def decline(user, inventory_id, item_id, borrower_id):
-    _listed_item(user.id, inventory_id, item_id, Role.ADMIN)
+def decline(user, listing, borrower_id):
     if borrower_id == user.id:
         raise PermissionDenied(OWN_REQUEST)
-    if not _through(inventory_id, item_id, LoanStatus.REQUESTED, borrower_id).end_loan():
+    if not _through(listing, LoanStatus.REQUESTED, borrower_id).end_loan():
         raise Conflict(LOAN_CHANGED)
 
 
-@transaction.atomic
-def mark_returned(user, inventory_id, item_id, borrower_id):
-    """Ends a loan made through the inventory, while the item is listed there."""
-    _listed_item(user.id, inventory_id, item_id, Role.ADMIN)
+def mark_returned(user, listing, borrower_id):
+    """Ends a loan made through the listing's inventory."""
     if borrower_id == user.id:
         raise PermissionDenied(OWN_LOAN)
-    if not _through(inventory_id, item_id, LoanStatus.ON_LOAN, borrower_id).end_loan():
+    if not _through(listing, LoanStatus.ON_LOAN, borrower_id).end_loan():
         raise Conflict(LOAN_CHANGED)
 
 

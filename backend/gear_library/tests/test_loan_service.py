@@ -6,9 +6,9 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 
 from gear_library import inventories, items, loans
 from gear_library.errors import Conflict
-from gear_library.models import Item, Membership
+from gear_library.models import InventoryItem, Item, Membership
 
-from .test_inventory_service import hold_after, run_in_thread, wait_for_a_blocked_lock
+from .test_inventory_service import as_, hold_after, run_in_thread, wait_for_a_blocked_lock
 from .test_item_service import join, list_directly, make_user
 
 
@@ -17,7 +17,8 @@ def people():
     """An inventory owned by Olive, where the admin Adam lists his rope and Mia and Max are
     members."""
     olive = make_user(1, "Olive")
-    inventory = inventories.create_inventory(olive, "Climbing").inventory
+    with transaction.atomic():
+        inventory = inventories.create_inventory(olive, "Climbing").inventory
     adam = join(inventory, "admin", 2)
     mia = join(inventory, "member", 3)
     max_ = join(inventory, "member", 4)
@@ -56,8 +57,12 @@ def second_inventory(people):
     return other
 
 
+def listing_of(inventory, item):
+    return InventoryItem.objects.select_related("item").get(inventory=inventory, item=item)
+
+
 def request(user, inventory, item):
-    loans.request_item(user, inventory.id, item.id)
+    loans.request_item(user, listing_of(inventory, item))
 
 
 @pytest.mark.django_db
@@ -66,18 +71,6 @@ class TestRequest:
         request(people["mia"], people["inventory"], people["rope"])
 
         assert loan_of(people["rope"]) == ("requested", people["mia"].id, people["inventory"].id)
-
-    def test_a_non_member_is_not_found(self, people):
-        with pytest.raises(NotFound):
-            request(make_user(9), people["inventory"], people["rope"])
-        assert loan_of(people["rope"]) == available()
-
-    def test_an_item_not_listed_here_is_not_found(self, people):
-        tent = items.create_item(people["olive"], {"name": "Tent"})
-
-        with pytest.raises(NotFound):
-            request(people["mia"], people["inventory"], tent)
-        assert loan_of(tent) == available()
 
     def test_the_owner_cannot_request_their_own_item(self, people):
         with pytest.raises(PermissionDenied):
@@ -108,11 +101,11 @@ class TestApproveAndDecline:
 
     def approve(self, user, people, borrower=None):
         borrower = borrower or people["mia"]
-        loans.approve(user, people["inventory"].id, people["rope"].id, borrower.id)
+        loans.approve(user, listing_of(people["inventory"], people["rope"]), borrower.id)
 
     def decline(self, user, people, borrower=None):
         borrower = borrower or people["mia"]
-        loans.decline(user, people["inventory"].id, people["rope"].id, borrower.id)
+        loans.decline(user, listing_of(people["inventory"], people["rope"]), borrower.id)
 
     @pytest.mark.parametrize("who", ["olive", "adam"])
     def test_admins_and_owners_approve(self, requested, who):
@@ -129,12 +122,6 @@ class TestApproveAndDecline:
         self.decline(requested[who], requested)
 
         assert loan_of(requested["rope"]) == available()
-
-    @pytest.mark.parametrize("action", ["approve", "decline"])
-    def test_a_member_cannot_approve_or_decline(self, requested, action):
-        with pytest.raises(PermissionDenied):
-            getattr(self, action)(requested["max"], requested)
-        assert loan_of(requested["rope"])[0] == "requested"
 
     @pytest.mark.parametrize("action", ["approve", "decline"])
     def test_an_owner_cannot_approve_or_decline_their_own_request(self, people, action):
@@ -168,12 +155,6 @@ class TestApproveAndDecline:
         with pytest.raises(Conflict):
             self.approve(requested["olive"], requested)
 
-    def test_an_item_not_listed_here_is_not_found(self, people):
-        tent = items.create_item(people["olive"], {"name": "Tent"})
-
-        with pytest.raises(NotFound):
-            loans.approve(people["olive"], people["inventory"].id, tent.id, people["mia"].id)
-
 
 @pytest.mark.django_db
 class TestMarkReturnedThroughTheInventory:
@@ -184,18 +165,13 @@ class TestMarkReturnedThroughTheInventory:
 
     def mark_returned(self, user, people, borrower=None):
         borrower = borrower or people["mia"]
-        loans.mark_returned(user, people["inventory"].id, people["rope"].id, borrower.id)
+        loans.mark_returned(user, listing_of(people["inventory"], people["rope"]), borrower.id)
 
     @pytest.mark.parametrize("who", ["olive", "adam"])
     def test_admins_and_owners_mark_it_returned(self, on_loan, who):
         self.mark_returned(on_loan[who], on_loan)
 
         assert loan_of(on_loan["rope"]) == available()
-
-    def test_a_member_cannot(self, on_loan):
-        with pytest.raises(PermissionDenied):
-            self.mark_returned(on_loan["max"], on_loan)
-        assert loan_of(on_loan["rope"])[0] == "on_loan"
 
     def test_the_borrower_cannot_mark_their_own_loan_returned(self, people):
         set_loan(people["rope"], "on_loan", people["olive"], people["inventory"])
@@ -221,13 +197,6 @@ class TestMarkReturnedThroughTheInventory:
     def test_a_loan_to_someone_else_than_the_caller_saw_conflicts(self, on_loan):
         with pytest.raises(Conflict):
             self.mark_returned(on_loan["olive"], on_loan, on_loan["max"])
-        assert loan_of(on_loan["rope"])[0] == "on_loan"
-
-    def test_an_item_no_longer_listed_here_is_not_found(self, on_loan):
-        items.remove_listing(on_loan["olive"], on_loan["inventory"].id, on_loan["rope"].id)
-
-        with pytest.raises(NotFound):
-            self.mark_returned(on_loan["olive"], on_loan)
         assert loan_of(on_loan["rope"])[0] == "on_loan"
 
 
@@ -262,7 +231,7 @@ class TestOwnerMarksReturned:
         self, people
     ):
         set_loan(people["rope"], "on_loan", people["mia"], people["inventory"])
-        owner = inventories.get_membership(people["olive"], people["inventory"].id, "owner")
+        owner = as_(people["olive"], people["inventory"])
         inventories.delete_inventory(owner)
 
         loans.owner_mark_returned(people["adam"], people["rope"].id, people["mia"].id)
@@ -317,28 +286,28 @@ class TestAutomaticCancels:
         assert loan_of(setup["lamp"]) == ("requested", setup["mia"].id, setup["other"].id)
 
     def test_removing_the_listing_from_the_loan_inventory(self, setup):
-        items.remove_listing(setup["olive"], setup["inventory"].id, setup["rope"].id)
-        items.remove_listing(setup["olive"], setup["inventory"].id, setup["tent"].id)
+        items.remove_listing(listing_of(setup["inventory"], setup["rope"]))
+        items.remove_listing(listing_of(setup["inventory"], setup["tent"]))
 
         self.assert_only_the_rope_request_ended(setup)
 
     def test_removing_the_listing_from_another_inventory_keeps_the_request(self, setup):
-        items.remove_listing(setup["adam"], setup["other"].id, setup["rope"].id)
+        items.remove_listing(listing_of(setup["other"], setup["rope"]))
 
         assert loan_of(setup["rope"])[0] == "requested"
 
     def test_the_item_owner_leaving(self, setup):
-        inventories.remove_member(setup["adam"], setup["inventory"].id, setup["adam"].id)
+        inventories.remove_member(as_(setup["adam"], setup["inventory"]), setup["adam"].id)
 
         self.assert_only_the_rope_request_ended(setup)
 
     def test_the_item_owner_being_removed(self, setup):
-        inventories.remove_member(setup["olive"], setup["inventory"].id, setup["adam"].id)
+        inventories.remove_member(as_(setup["olive"], setup["inventory"]), setup["adam"].id)
 
         self.assert_only_the_rope_request_ended(setup)
 
     def test_the_item_owner_taking_the_member_role(self, setup):
-        owner = inventories.get_membership(setup["olive"], setup["inventory"].id, "owner")
+        owner = as_(setup["olive"], setup["inventory"])
         inventories.set_role(owner, setup["adam"].id, "member")
 
         self.assert_only_the_rope_request_ended(setup)
@@ -346,27 +315,27 @@ class TestAutomaticCancels:
     def test_the_requester_leaving(self, setup):
         Item.objects.filter(pk=setup["tent"].pk).update(borrower=setup["mia"])
 
-        inventories.remove_member(setup["mia"], setup["inventory"].id, setup["mia"].id)
+        inventories.remove_member(as_(setup["mia"], setup["inventory"]), setup["mia"].id)
 
         assert loan_of(setup["rope"]) == available()
         assert loan_of(setup["tent"]) == ("on_loan", setup["mia"].id, setup["inventory"].id)
         assert loan_of(setup["lamp"]) == ("requested", setup["mia"].id, setup["other"].id)
 
     def test_the_requester_being_removed(self, setup):
-        inventories.remove_member(setup["olive"], setup["inventory"].id, setup["mia"].id)
+        inventories.remove_member(as_(setup["olive"], setup["inventory"]), setup["mia"].id)
 
         assert loan_of(setup["rope"]) == available()
         assert loan_of(setup["lamp"]) == ("requested", setup["mia"].id, setup["other"].id)
 
     def test_the_requester_taking_another_role_keeps_the_request(self, setup):
-        owner = inventories.get_membership(setup["olive"], setup["inventory"].id, "owner")
+        owner = as_(setup["olive"], setup["inventory"])
         inventories.set_role(owner, setup["mia"].id, "admin")
         inventories.set_role(owner, setup["mia"].id, "member")
 
         assert loan_of(setup["rope"])[0] == "requested"
 
     def test_deleting_the_loan_inventory_ends_its_requests_and_keeps_its_loans(self, setup):
-        owner = inventories.get_membership(setup["olive"], setup["inventory"].id, "owner")
+        owner = as_(setup["olive"], setup["inventory"])
 
         inventories.delete_inventory(owner)
 
@@ -392,13 +361,7 @@ class TestDeletingAnItem:
         assert people["rope"].listings.count() == 1
 
 
-def ids(people):
-    """The inventory, item and borrower ids of Mia's loan of the rope."""
-    return people["inventory"].id, people["rope"].id, people["mia"].id
-
-
 UPDATE_ITEM = 'UPDATE "gear_library_item" '
-DELETE_LISTING = 'DELETE FROM "gear_library_inventoryitem" '
 
 
 @pytest.mark.django_db(transaction=True)
@@ -416,24 +379,6 @@ class TestCommittedRaces:
                 thread.join(10)
         return outcomes
 
-    def test_a_request_waits_for_the_listing_removal_and_is_not_found(self, people):
-        """Without the inventory lock, the request could commit after the listing was
-        removed, and leave a request through an inventory the item is not listed in."""
-        held, release = threading.Event(), threading.Event()
-
-        def unlist():
-            with connection.execute_wrapper(hold_after(DELETE_LISTING, held, release)):
-                items.remove_listing(people["olive"], people["inventory"].id, people["rope"].id)
-
-        def request_it():
-            request(people["mia"], people["inventory"], people["rope"])
-
-        outcomes = self.race(unlist, request_it, held, release)
-
-        assert outcomes["first"] == "ok"
-        assert isinstance(outcomes["second"], NotFound)
-        assert loan_of(people["rope"]) == available()
-
     def test_a_cancel_waits_for_an_approval_and_conflicts(self, people):
         request(people["mia"], people["inventory"], people["rope"])
         held, release = threading.Event(), threading.Event()
@@ -441,7 +386,8 @@ class TestCommittedRaces:
         def approve():
             with transaction.atomic():
                 with connection.execute_wrapper(hold_after(UPDATE_ITEM, held, release)):
-                    loans.approve(people["olive"], *ids(people))
+                    listing = listing_of(people["inventory"], people["rope"])
+                    loans.approve(people["olive"], listing, people["mia"].id)
 
         outcomes = self.race(
             approve, lambda: loans.cancel(people["mia"], people["rope"].id), held, release
