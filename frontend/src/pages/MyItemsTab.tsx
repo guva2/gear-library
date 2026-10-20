@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
-import { Confirmation, Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
-import { fullName, getJson } from "../inventories";
-import { borrowerText, describeItem, type BorrowedItem, type Item } from "../items";
+import {
+  Confirmation,
+  Field,
+  FormErrors,
+  unreachable,
+  useChange,
+  useFocusFirstInvalid,
+} from "../forms";
+import { useAuth } from "../auth";
+import { getJson } from "../inventories";
+import { borrowerText, describeItem, type Item } from "../items";
 import { useLoad } from "../load";
 
 const FIELDS = ["name", "description"] as const;
@@ -18,53 +25,31 @@ function listedIn(item: Item): string {
   return `Listed in ${item.inventories.map((inventory) => inventory.name).join(", ")}.`;
 }
 
-function loanState(item: Item): string {
+/** True while the signed-in user, the item's owner, uses it. */
+function inUse(item: Item, userId: number | undefined): boolean {
+  return item.loan_status === "on_loan" && item.borrower?.id === userId;
+}
+
+function loanState(item: Item, userId: number | undefined): string {
   if (!item.borrower) return "Available.";
+  if (inUse(item, userId)) return "In use by you.";
   const state = borrowerText(item.loan_status, item.borrower);
   return item.loan_inventory ? `${state}, through ${item.loan_inventory.name}.` : `${state}.`;
 }
 
-interface PageData {
-  items: Item[];
-  borrowed: BorrowedItem[];
-}
-
-async function loadPage(signal: AbortSignal): Promise<PageData> {
-  const [items, borrowed] = await Promise.all([
-    getJson<Item[]>("/api/items/", signal),
-    getJson<BorrowedItem[]>("/api/borrowing/", signal),
-  ]);
-  return { items, borrowed };
-}
-
-export default function GearPage() {
-  const [page, reload] = useLoad(loadPage);
-  const [errors, setErrors] = useState<FieldErrors>({});
-
-  /** Sends a change, shows a refusal at the top of the page, and reloads either way. */
-  async function change(path: string, method: "POST" | "DELETE", body?: unknown) {
-    setErrors({});
-    try {
-      const response = await apiFetch(path, { method, body });
-      if (!response.ok) setErrors(await readErrors(response, []));
-      reload();
-    } catch {
-      setErrors(unreachable());
-    }
-  }
+/** Every item the signed-in user owns, listed or not. */
+export default function MyItemsTab() {
+  const [page, reload] = useLoad((signal) => getJson<Item[]>("/api/items/", signal));
+  const { errors, setErrors, change } = useChange(reload);
 
   return (
     <>
-      <h2>My gear</h2>
-      <p>
-        <Link to="/">My inventories</Link>
-      </p>
       <FormErrors errors={errors} />
       {page.status === "loading" && <p>Loading…</p>}
-      {page.status === "error" && <p role="alert">Could not load your gear.</p>}
+      {page.status === "error" && <p role="alert">Could not load your items.</p>}
       {page.status === "ok" && (
         <ItemList
-          items={page.data.items}
+          items={page.data}
           reload={reload}
           onSubmit={() => setErrors({})}
           onGone={(errors) => {
@@ -75,15 +60,10 @@ export default function GearPage() {
           onReturn={(item, borrowerId) =>
             change(`/api/items/${item.id}/return/`, "POST", { borrower_id: borrowerId })
           }
+          onUse={(item) => change(`/api/items/${item.id}/use/`, "POST")}
         />
       )}
       <AddItem reload={reload} onSubmit={() => setErrors({})} />
-      {page.status === "ok" && (
-        <Borrowing
-          borrowed={page.data.borrowed}
-          onCancel={(item) => change(`/api/borrowing/${item.id}/cancel/`, "POST")}
-        />
-      )}
     </>
   );
 }
@@ -98,9 +78,19 @@ interface ItemListProps {
   onDelete: (item: Item) => void;
   /** Called with the borrower the page showed. */
   onReturn: (item: Item, borrowerId: number) => void;
+  onUse: (item: Item) => void;
 }
 
-function ItemList({ items, reload, onSubmit, onGone, onDelete, onReturn }: ItemListProps) {
+function ItemList({
+  items,
+  reload,
+  onSubmit,
+  onGone,
+  onDelete,
+  onReturn,
+  onUse,
+}: ItemListProps) {
+  const { user } = useAuth();
   const [editing, setEditing] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<Item | null>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -147,7 +137,7 @@ function ItemList({ items, reload, onSubmit, onGone, onDelete, onReturn }: ItemL
                 <>
                   <p>{describeItem(item)}</p>
                   <p>{listedIn(item)}</p>
-                  <p>{loanState(item)}</p>
+                  <p>{loanState(item, user?.id)}</p>
                   <p>
                     <button
                       type="button"
@@ -164,18 +154,13 @@ function ItemList({ items, reload, onSubmit, onGone, onDelete, onReturn }: ItemL
                     >
                       Delete
                     </button>
-                    {item.loan_status === "on_loan" && item.borrower && (
-                      <>
-                        {" "}
-                        <button
-                          type="button"
-                          aria-label={`Mark ${item.name} returned`}
-                          onClick={() => item.borrower && onReturn(item, item.borrower.id)}
-                        >
-                          Mark returned
-                        </button>
-                      </>
-                    )}
+                    {" "}
+                    <LoanButton
+                      item={item}
+                      inUse={inUse(item, user?.id)}
+                      onReturn={onReturn}
+                      onUse={onUse}
+                    />
                   </p>
                 </>
               )}
@@ -195,6 +180,42 @@ function ItemList({ items, reload, onSubmit, onGone, onDelete, onReturn }: ItemL
         />
       )}
     </section>
+  );
+}
+
+interface LoanButtonProps {
+  item: Item;
+  inUse: boolean;
+  onReturn: (item: Item, borrowerId: number) => void;
+  onUse: (item: Item) => void;
+}
+
+/**
+ * Use it myself while the item is available, Done using it while the owner uses it, and
+ * Mark returned while someone else has it on loan. One button, so focus stays on it when
+ * the item changes state.
+ */
+function LoanButton({ item, inUse, onReturn, onUse }: LoanButtonProps) {
+  const borrower = item.borrower;
+  let action: { label: string; name: string; run: () => void };
+  if (item.loan_status === "available") {
+    action = {
+      label: "Use it myself",
+      name: `Use it myself: ${item.name}`,
+      run: () => onUse(item),
+    };
+  } else if (item.loan_status === "on_loan" && borrower) {
+    const run = () => onReturn(item, borrower.id);
+    action = inUse
+      ? { label: "Done using it", name: `Done using it: ${item.name}`, run }
+      : { label: "Mark returned", name: `Mark ${item.name} returned`, run };
+  } else {
+    return null;
+  }
+  return (
+    <button type="button" aria-label={action.name} onClick={action.run}>
+      {action.label}
+    </button>
   );
 }
 
@@ -284,50 +305,6 @@ function AddItem({ reload, onSubmit }: { reload: () => void; onSubmit: () => voi
         <Field name="description" label="Description" errors={errors} required={false} />
         <button type="submit">Add</button>
       </form>
-    </section>
-  );
-}
-
-interface BorrowingProps {
-  borrowed: BorrowedItem[];
-  onCancel: (item: BorrowedItem) => void;
-}
-
-function borrowedText(item: BorrowedItem): string {
-  const owned = `${describeItem(item)}, owned by ${fullName(item.owner)}.`;
-  const through = item.loan_inventory ? ` through ${item.loan_inventory.name}` : "";
-  const state = item.loan_status === "requested" ? "Requested" : "On loan to you";
-  return `${owned} ${state}${through}.`;
-}
-
-/** The signed-in user's pending requests and the items they hold. */
-function Borrowing({ borrowed, onCancel }: BorrowingProps) {
-  return (
-    <section aria-labelledby="borrowing">
-      <h3 id="borrowing">Borrowing</h3>
-      {borrowed.length === 0 ? (
-        <p>You have not requested or borrowed anything.</p>
-      ) : (
-        <ul>
-          {borrowed.map((item) => (
-            <li key={item.id}>
-              <span>{borrowedText(item)}</span>
-              {item.loan_status === "requested" && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    aria-label={`Cancel request for ${item.name}`}
-                    onClick={() => onCancel(item)}
-                  >
-                    Cancel request
-                  </button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
     </section>
   );
 }

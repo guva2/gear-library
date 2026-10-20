@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import type { Connection, ConnectionRequests, ReceivedRequest, SentRequest } from "../connections";
 import { Confirmation, Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
@@ -56,9 +55,6 @@ export default function ConnectionsPage() {
   return (
     <>
       <h2>My connections</h2>
-      <p>
-        <Link to="/">My inventories</Link>
-      </p>
       <FormErrors errors={errors} />
       {page.status === "loading" && <p>Loading…</p>}
       {page.status === "error" && <p role="alert">Could not load your connections.</p>}

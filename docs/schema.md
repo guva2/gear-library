@@ -73,8 +73,8 @@ accepted. Only an `active` row makes the user a member.
     and requests to borrow its items.
   - `admin`: also sees every member with their phone number and role, invites their own
     accepted connections, sees and revokes any pending invite, lists their own items in
-    the inventory and removes them, approves and declines borrow requests made through
-    the inventory, and marks those items returned.
+    the inventory and removes them, uses its items without asking, approves and declines
+    borrow requests made through the inventory, and marks those items returned.
   - `owner`: also removes members, sets any member's role, removes any item from the
     inventory, renames the inventory and deletes it.
 
@@ -110,8 +110,8 @@ physical object, so its loan state is on this row, not per inventory.
 | `name` | `varchar(64)` | | M7 |
 | `description` | `varchar(512)` | Optional. | M7 |
 | `created_at` | `timestamptz` | | M7 |
-| `borrower_id` | → `User` | Nullable. `on_delete=models.PROTECT`. The requester while `requested`, the borrower while `on_loan`. | M9 |
-| `loan_inventory_id` | → `Inventory` | Nullable. `on_delete=models.SET_NULL`. The inventory the borrow request was made through. | M9 |
+| `borrower_id` | → `User` | Nullable. `on_delete=models.PROTECT`. The requester while `requested`, the borrower while `on_loan`. The owner while they use their own item. | M9 |
+| `loan_inventory_id` | → `Inventory` | Nullable. `on_delete=models.SET_NULL`. The inventory the request or loan was made through. Null while the owner uses their own item. | M9 |
 | `loan_status` | `varchar(9)` | `available`, `requested` or `on_loan`. | M9 |
 
 The checks below arrive with the loan columns in M9.
@@ -120,7 +120,8 @@ The checks below arrive with the loan columns in M9.
   - `available`, with `borrower_id` and `loan_inventory_id` both null.
   - `requested`, with `borrower_id` and `loan_inventory_id` both set.
   - `on_loan`, with `borrower_id` set. `loan_inventory_id` may be null.
-- Check: `borrower_id <> owner_id`.
+- Check: when `borrower_id = owner_id`, the item is `on_loan` and `loan_inventory_id` is
+  null. This is the owner using their own item. This check arrives in M11.
 - There is no loan history. The row holds only the current loan state.
 
 ### `InventoryItem` (`gear_library_inventoryitem`)
@@ -167,8 +168,8 @@ These rules span tables, so the database cannot check them alone.
 - Each of these locks one inventory only. Deleting an item is the only operation that
   locks several (see below). Reads (`GET`) take no lock.
 - Creating an inventory, accepting, declining and revoking an invite, connection changes,
-  creating and editing an item, cancelling a request and the item owner's mark returned
-  take no inventory lock.
+  creating and editing an item, cancelling a request, the item owner's use and the item
+  owner's mark returned take no inventory lock.
 - Revoking checks that the caller is an admin or owner without the inventory lock. A
   revoke that read the caller's role just before an owner lowered it still deletes the
   invite.
@@ -196,24 +197,30 @@ These rules span tables, so the database cannot check them alone.
   accepted returns it.
 - Listing an item locks the item's row after the inventory's. Removing a listing deletes
   it, then cancels a pending request made through the inventory.
-- Requesting is one conditional update on the item where `loan_status = 'available'`.
-  Approve, decline and mark returned through an inventory are each one conditional update
-  that matches the `loan_status`, `borrower_id` and `loan_inventory_id` the acting user
-  saw. If no row matches, the request or loan changed in the meantime and the action gets
-  `409`.
+- Borrowing through an inventory, a `member`'s request or an admin's or owner's use, is one
+  conditional update on the item where `loan_status = 'available'`. Approve, decline and
+  mark returned through an inventory are each one conditional update that matches the
+  `loan_status`, `borrower_id` and `loan_inventory_id` the acting user saw. If no row
+  matches, the request or loan changed in the meantime and the action gets `409`.
 - Cancelling and the item owner's mark returned are each one conditional update on the
   item: cancelling matches `loan_status = 'requested'` and the caller as `borrower_id`, and
   the owner's mark returned matches `loan_status = 'on_loan'` and the `borrower_id` the
   owner saw. A pending request ends when its requester leaves the loan inventory or the
   item leaves it, so a cancel needs no membership or listing check. A cancel and an
   approval of the same request wait on the item row, and the second one gets `409`.
+- The item owner's use is one conditional update on the item where
+  `loan_status = 'available'` and the caller is the owner. It holds no other lock while it
+  waits on the item row, so it cannot reverse the inventory-then-item order that deleting
+  an item takes. A use that waits on a delete finds the item gone (`404`). A delete after
+  a use finds the item `on_loan` (`409`).
 - The automatic cancels are conditional updates too: they match `loan_status = 'requested'`
   and the `loan_inventory_id` being left or removed. Each runs under that inventory's lock.
 - Deleting an item reads the inventories it is listed in, locks them (`select_for_update`)
   in ascending `id` order, then locks the item row. It then re-reads the item's listings.
   A listing added in between is in an inventory it has not locked, and taking that lock
-  after the item row would reverse the lock order, so the delete rolls back to before its
-  locks and starts again. An item `on_loan` gets `409`. Otherwise the delete removes the
+  after the item row would reverse the lock order, so the delete gets `409`. Only the
+  owner lists their item, so this needs the owner to list and delete the same item at
+  once. An item `on_loan` gets `409`. Otherwise the delete removes the
   listings and the row. A listing that waits on the delete's item lock finds the item gone
   (`400` on `item_id`).
 
@@ -274,21 +281,36 @@ These rules span tables, so the database cannot check them alone.
 
 ### Borrowing
 
-- A borrow request names the inventory it is made through. The requester must be a member
-  of it, the item must be listed in it, and the requester must not own the item.
-- A borrow request is one conditional update: set the borrower and loan inventory only if
-  the item is `available`. One requester at a time, across all of the item's listings.
-  Other requests are blocked until the request is declined or cancelled, or the item is
+- Borrowing names the inventory it is made through. The borrower must be a member of it,
+  the item must be listed in it, and the borrower must not own the item.
+- A `member` makes a request, which waits for approval. An admin or owner of the inventory
+  uses the item without asking: it goes on loan to them at once, with that inventory as
+  its loan inventory.
+- The item's owner uses their own item without any inventory: it goes on loan to them,
+  with no loan inventory.
+- Borrowing and the owner's use are each one conditional update: set the loan only if the
+  item is `available`. One borrower at a time, across all of the item's listings. Other
+  requests are blocked until the request is declined or cancelled, or the item is
   returned.
 - Admins and owners of the loan inventory approve and decline requests. The borrower
   cancels while the request is pending.
 - Admins and owners of the loan inventory mark an item returned while the item is listed
-  there. The item's owner can always mark it returned, so a loan stays closable after its
-  listing or loan inventory is gone.
-- The borrower cannot approve their own request or mark their own loan returned.
+  there, their own loans included. The item's owner can always mark it returned, so a loan
+  stays closable after its listing or loan inventory is gone.
+- The borrower cannot approve or decline their own request. A borrower who is a `member`
+  of the loan inventory cannot mark their loan returned.
+- Who sees the borrower:
+  - The item's owner sees the borrower of every request and loan of their item.
+  - Admins and owners of an inventory see the borrower of a request or loan made through
+    it, while the item is listed there.
+  - Everyone else, `member`s included, sees only the loan status, and whether they are
+    the borrower.
+  - So an admin's use through an inventory shows them to the item's owner and to that
+    inventory's other admins and owners. The owner's own use has no loan inventory, and
+    names them to no one else.
 - A pending request is cancelled when the item leaves the loan inventory, when the
   requester leaves or is removed from it, or when the item is deleted.
-- An item cannot be deleted while it is `on_loan`.
+- An item cannot be deleted while it is `on_loan`, its owner's own use included.
 
 ### Deleting
 

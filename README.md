@@ -4,14 +4,16 @@ Share gear through inventories. You own your items. An inventory is a group of p
 share gear: only its members see it and the items listed in it. You can create or join any
 number of inventories, and you have one role in each:
 
-- `member`: sees and borrows the inventory's items, and sees who its admins and owners are.
+- `member`: sees the inventory's items and requests to borrow them, and sees who its admins
+  and owners are.
 - `admin`: also sees every member, invites their connections and revokes invites, lists
-  and removes their own items, approves and declines borrow requests made through the
-  inventory, and marks those items returned.
+  and removes their own items, uses the inventory's items without asking, approves and
+  declines borrow requests made through the inventory, and marks those items returned.
 - `owner`: also sets members' roles, removes members, and renames or deletes the
   inventory.
 
-The full rights of each role are in [`docs/schema.md`](docs/schema.md).
+You can also mark your own items unavailable while you use them. The full rights of each
+role are in [`docs/schema.md`](docs/schema.md).
 
 You connect with other users by phone number: send a request, and they accept or decline
 it. Connected users see each other's name and phone number.
@@ -28,9 +30,15 @@ docker compose up --build
 ```
 
 Open <http://localhost:5173>, then create an account or log in as a demo user (see
-[Demo data](#demo-data)). The home page checks once on load whether the backend and
-database are up. On a first start the backend may still be migrating, so reload the page
-to check again.
+[Demo data](#demo-data)). To check that the backend and database are up:
+
+```sh
+curl http://localhost:5173/api/health/
+```
+
+It answers `{"status": "ok", "database": "ok"}`, or `503` when the database is
+unavailable. On a first start the backend may still be migrating, so try again after a
+few seconds.
 
 `docker compose up` starts three services:
 
@@ -86,7 +94,7 @@ missing.
 docker compose run --rm backend python manage.py seed_demo
 ```
 
-creates three demo users, two inventories, the users' connections, their gear, one borrow
+creates three demo users, three inventories, the users' connections, their gear, one borrow
 request and one loan. Running it again changes nothing: users that already exist are left
 as they are, a demo inventory is skipped when its owner below is already in an inventory
 with that name, a demo connection is skipped when the two users already have a connection
@@ -94,14 +102,25 @@ or a request, and a demo item is skipped, with its listings and its loan, when i
 already has an item with that name. A database seeded by an older version of this command
 therefore keeps its old connections; to reset them, delete the demo users' connections and
 run `seed_demo` again. Its demo items already exist, so they get no borrow request or loan.
+An existing demo inventory likewise keeps its old members and invites, and the table below
+describes only a fresh database. On one seeded by an older version, Avery still has a
+pending Camping Crew invite, gets a second one to Hiking Group, and sees nothing on
+Discover until accepting the Camping Crew invite. To get the new layout, accept it as Avery
+in the app, or start from an empty database with `docker compose down -v`, then
+`docker compose up` and the command above.
 Log in at
 <http://localhost:5173> with any of them, using the password `gear-library-demo`:
 
-| Phone number | Name | Climbing Club | Camping Crew |
-|---|---|---|---|
-| (555) 555-0101 | Avery Brooks | owner | pending invite from Sam, not a member yet |
-| (555) 555-0102 | Jordan Diaz | admin | owner |
-| (555) 555-0103 | Sam Okafor | member | admin |
+| Phone number | Name | Climbing Club | Camping Crew | Hiking Group |
+|---|---|---|---|---|
+| (555) 555-0101 | Avery Brooks | owner | member | pending invite from Sam, not a member yet |
+| (555) 555-0102 | Jordan Diaz | admin | owner | not a member |
+| (555) 555-0103 | Sam Okafor | member | admin | owner |
+
+Discover shows a user only the items they can borrow but not use themselves: Avery sees
+the Camping Crew gear and Sam the Climbing Club gear, except the first aid kit, which is
+listed in both. Jordan is an admin or owner everywhere and sees nothing. Hiking Group has
+no gear.
 
 Connections:
 

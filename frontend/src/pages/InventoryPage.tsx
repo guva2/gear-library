@@ -20,6 +20,7 @@ import {
   borrowerText,
   describeItem,
   LOAN_STATUS_LABELS,
+  type BorrowedItem,
   type Item,
   type ListedItem,
 } from "../items";
@@ -38,12 +39,14 @@ interface PageData {
   listed: ListedItem[];
   /** The caller's own items. Loaded only for admins and owners. */
   myItems: Item[];
+  /** Ids of the items the caller holds, through any inventory, and may mark returned. */
+  heldReturnable: ReadonlySet<number>;
 }
 
 async function loadPage(base: string, signal: AbortSignal): Promise<PageData> {
   const inventory = await getJson<Inventory>(base, signal);
   const staff = hasRole(inventory.role, "admin");
-  const [people, invites, connections, listed, myItems] = await Promise.all([
+  const [people, invites, connections, listed, myItems, borrowed] = await Promise.all([
     staff
       ? getJson<Member[]>(`${base}members/`, signal).then(
           (members): People => ({ staff: true, members }),
@@ -55,8 +58,14 @@ async function loadPage(base: string, signal: AbortSignal): Promise<PageData> {
     staff ? getJson<Connection[]>("/api/connections/", signal) : [],
     getJson<ListedItem[]>(`${base}items/`, signal),
     staff ? getJson<Item[]>("/api/items/", signal) : [],
+    getJson<BorrowedItem[]>("/api/borrowing/", signal),
   ]);
-  return { inventory, people, invites, connections, listed, myItems };
+  const heldReturnable = new Set(
+    borrowed
+      .filter((item) => item.loan_status === "on_loan" && item.can_return)
+      .map((item) => item.id),
+  );
+  return { inventory, people, invites, connections, listed, myItems, heldReturnable };
 }
 
 type Method = "POST" | "PATCH" | "DELETE";
@@ -84,7 +93,7 @@ export default function InventoryPage() {
 function NotFound() {
   return (
     <p>
-      Inventory not found. <Link to="/">Go home</Link>
+      Inventory not found. <Link to="/manage/inventories">Back to my inventories</Link>
     </p>
   );
 }
@@ -130,7 +139,7 @@ function InventoryView({ base }: { base: string }) {
   async function leaveOrDelete(path: string) {
     const failed = await send(path, "DELETE");
     if (failed) setErrors(failed.errors);
-    else navigate("/");
+    else navigate("/manage/inventories");
   }
 
   if (page.status === "loading") return <p>Loading…</p>;
@@ -139,7 +148,8 @@ function InventoryView({ base }: { base: string }) {
     return <p role="alert">Could not load the inventory.</p>;
   }
 
-  const { inventory, people, invites, connections, listed, myItems } = page.data;
+  const { inventory, people, invites, connections, listed, myItems, heldReturnable } =
+    page.data;
   const isOwner = inventory.role === "owner";
   const myItemIds = new Set(myItems.map((item) => item.id));
   return (
@@ -147,7 +157,7 @@ function InventoryView({ base }: { base: string }) {
       <h2>{inventory.name}</h2>
       <p>Your role: {inventory.role}</p>
       <p>
-        <Link to="/">My inventories</Link>
+        <Link to="/manage/inventories">My inventories</Link>
       </p>
       <FormErrors errors={refusal} />
       <FormErrors errors={errors} />
@@ -181,9 +191,11 @@ function InventoryView({ base }: { base: string }) {
       )}
       <Items
         listed={listed}
+        staff={people.staff}
         listable={people.staff ? listable(myItems, listed) : null}
         removable={(item) => people.staff && (isOwner || myItemIds.has(item.id))}
         owned={(item) => myItemIds.has(item.id)}
+        heldReturnable={heldReturnable}
         send={send}
         sent={sent}
         base={base}
@@ -230,54 +242,57 @@ function MemberTable({ members, ownerId, onSetRole, onRemove }: MemberTableProps
   return (
     <section aria-labelledby="members">
       <h3 id="members">Members</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Phone number</th>
-            <th>Role</th>
-            {controls && <th>Remove</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {members.map((member) => (
-            <tr key={member.id}>
-              <td>{fullName(member)}</td>
-              <td>{formatPhoneNumber(member.phone_number)}</td>
-              <td>
-                {controls ? (
-                  <select
-                    aria-label={`Role for ${fullName(member)}`}
-                    value={member.role}
-                    onChange={(event) => pickRole(member, event.target.value as Role)}
-                  >
-                    {ROLES.map((role) => (
-                      <option key={role} value={role}>
-                        {role}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  member.role
-                )}
-              </td>
-              {controls && (
+      {/* Focusable so a keyboard user can scroll it when the table is wider than the screen. */}
+      <div className="table-scroll" role="region" aria-label="Members table" tabIndex={0}>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Phone number</th>
+              <th>Role</th>
+              {controls && <th>Remove</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((member) => (
+              <tr key={member.id}>
+                <td>{fullName(member)}</td>
+                <td>{formatPhoneNumber(member.phone_number)}</td>
                 <td>
-                  {member.id !== ownerId && (
-                    <button
-                      type="button"
-                      aria-label={`Remove ${fullName(member)}`}
-                      onClick={() => onRemove(member)}
+                  {controls ? (
+                    <select
+                      aria-label={`Role for ${fullName(member)}`}
+                      value={member.role}
+                      onChange={(event) => pickRole(member, event.target.value as Role)}
                     >
-                      Remove
-                    </button>
+                      {ROLES.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    member.role
                   )}
                 </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                {controls && (
+                  <td>
+                    {member.id !== ownerId && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${fullName(member)}`}
+                        onClick={() => onRemove(member)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {controls && ownRole && (
         <Confirmation
           message={`Change your role to ${ownRole.role}? You will no longer be an owner.`}
@@ -378,33 +393,76 @@ function listable(myItems: Item[], listed: ListedItem[]): Item[] {
   return myItems.filter((item) => !listedIds.has(item.id));
 }
 
-/** The loan status, with who has requested or borrowed the item when the caller may see it. */
-function loanText(item: ListedItem): string {
+interface Holding {
+  item: ListedItem;
+  /** True for the caller's own items. */
+  owned: boolean;
+  /** True when the caller is an admin or owner here. */
+  staff: boolean;
+  base: string;
+}
+
+/**
+ * Where the caller marks an item they hold returned: as its owner, or as an admin or owner
+ * here when the item's `borrower` is present. `null` when they do not hold it or may not
+ * mark it returned.
+ */
+function holderReturnPath({ item, owned, staff, base }: Holding): string | null {
+  if (item.loan_status !== "on_loan" || !item.borrowed_by_me) return null;
+  if (owned) return `/api/items/${item.id}/return/`;
+  if (staff && item.borrower) return `${base}items/${item.id}/return/`;
+  return null;
+}
+
+/**
+ * The loan status, with who has requested or borrowed the item when the caller may see it.
+ * `heldReturnable` is true when the caller holds the item through any inventory and may
+ * mark it returned themselves.
+ */
+function loanText(holding: Holding, heldReturnable: boolean): string {
+  const { item } = holding;
+  if (heldReturnable || holderReturnPath(holding)) return "In use by you";
   const borrower = item.borrowed_by_me ? "you" : item.borrower;
   if (!borrower) return LOAN_STATUS_LABELS[item.loan_status];
   return borrowerText(item.loan_status, borrower);
 }
 
-interface LoanButtonsProps {
-  item: ListedItem;
-  owned: boolean;
-  base: string;
+interface LoanButtonsProps extends Holding {
+  userId: number | undefined;
   onLoanChange: (path: string, body?: unknown) => void;
 }
 
 /**
  * The loan changes the caller may make. Approve, decline and mark returned send the
- * borrower the page showed.
+ * borrower the page showed. Use it myself and Done using it share a key, so the button
+ * keeps focus when the item changes between them.
  */
-function LoanButtons({ item, owned, base, onLoanChange }: LoanButtonsProps) {
+function LoanButtons({ userId, onLoanChange, ...holding }: LoanButtonsProps) {
+  const { item, owned, staff, base } = holding;
   const path = `${base}items/${item.id}/`;
-  const buttons: { label: string; name: string; onClick: () => void }[] = [];
+  const buttons: { key?: string; label: string; name: string; onClick: () => void }[] = [];
   const asStaff = item.borrower && !item.borrowed_by_me ? { borrower_id: item.borrower.id } : null;
-  if (item.loan_status === "available" && !owned) {
+  const returnPath = holderReturnPath(holding);
+  if (item.loan_status === "available" && (owned || staff)) {
     buttons.push({
-      label: "Request",
-      name: `Request ${item.name}`,
+      key: "availability",
+      label: "Use it myself",
+      name: `Use it myself: ${item.name}`,
+      onClick: () => onLoanChange(owned ? `/api/items/${item.id}/use/` : `${path}borrow/`),
+    });
+  } else if (item.loan_status === "available") {
+    buttons.push({
+      label: "Ask to borrow",
+      name: `Ask to borrow ${item.name}`,
       onClick: () => onLoanChange(`${path}borrow/`),
+    });
+  }
+  if (returnPath && userId !== undefined) {
+    buttons.push({
+      key: "availability",
+      label: "Done using it",
+      name: `Done using it: ${item.name}`,
+      onClick: () => onLoanChange(returnPath, { borrower_id: userId }),
     });
   }
   if (item.loan_status === "requested" && item.borrowed_by_me) {
@@ -436,7 +494,7 @@ function LoanButtons({ item, owned, base, onLoanChange }: LoanButtonsProps) {
     });
   }
   return buttons.map((button) => (
-    <span key={button.name}>
+    <span key={button.key ?? button.name}>
       {" "}
       <button type="button" aria-label={button.name} onClick={button.onClick}>
         {button.label}
@@ -447,11 +505,15 @@ function LoanButtons({ item, owned, base, onLoanChange }: LoanButtonsProps) {
 
 interface ItemsProps {
   listed: ListedItem[];
+  /** True when the caller is an admin or owner here. */
+  staff: boolean;
   /** The items the caller may list here, or `null` for a `member`, who lists nothing. */
   listable: Item[] | null;
   removable: (item: ListedItem) => boolean;
   /** True for the caller's own items. */
   owned: (item: ListedItem) => boolean;
+  /** Ids of the items the caller holds, through any inventory, and may mark returned. */
+  heldReturnable: ReadonlySet<number>;
   send: Send;
   sent: number;
   base: string;
@@ -462,9 +524,11 @@ interface ItemsProps {
 
 function Items({
   listed,
+  staff,
   listable,
   removable,
   owned,
+  heldReturnable,
   send,
   sent,
   base,
@@ -472,6 +536,7 @@ function Items({
   onRemove,
   onLoanChange,
 }: ItemsProps) {
+  const { user } = useAuth();
   return (
     <section aria-labelledby="items">
       <h3 id="items">Items</h3>
@@ -482,11 +547,13 @@ function Items({
           {listed.map((item) => (
             <li key={item.id}>
               <span>{`${describeItem(item)}, owned by ${fullName(item.owner)}`}</span>{" "}
-              <span>{loanText(item)}</span>
+              <span>{loanText({ item, owned: owned(item), staff, base }, heldReturnable.has(item.id))}</span>
               <LoanButtons
                 item={item}
                 owned={owned(item)}
+                staff={staff}
                 base={base}
+                userId={user?.id}
                 onLoanChange={onLoanChange}
               />
               {removable(item) && (
@@ -519,7 +586,7 @@ function Items({
           unknown="That item"
           empty={
             <>
-              No items to list. Add gear in <Link to="/gear">My gear</Link>.
+              No items to list. Add gear in <Link to="/manage/items">My items</Link>.
             </>
           }
           path={`${base}items/`}

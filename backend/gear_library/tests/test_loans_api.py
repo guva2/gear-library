@@ -71,6 +71,7 @@ def person(user):
         "/api/inventories/1/items/1/return/",
         "/api/borrowing/1/cancel/",
         "/api/items/1/return/",
+        "/api/items/1/use/",
     ],
 )
 def test_anonymous_callers_are_refused(url):
@@ -88,6 +89,29 @@ class TestBorrow:
         response = client_for(people["mia"]).post(action_url(people, "borrow"))
 
         assert response.status_code == 204
+        assert loan_of(people["rope"]) == ("requested", people["mia"].id, people["inventory"].id)
+
+    def test_an_admin_uses_an_item_without_asking(self, people):
+        tent = Item.objects.create(owner=people["olive"], name="Tent")
+        list_in(people["inventory"], tent)
+
+        response = client_for(people["adam"]).post(action_url(people, "borrow", tent))
+
+        assert response.status_code == 204
+        assert loan_of(tent) == ("on_loan", people["adam"].id, people["inventory"].id)
+
+    def test_an_owner_uses_an_item_without_asking(self, people):
+        response = client_for(people["olive"]).post(action_url(people, "borrow"))
+
+        assert response.status_code == 204
+        assert loan_of(people["rope"]) == ("on_loan", people["olive"].id, people["inventory"].id)
+
+    def test_an_admin_cannot_use_an_item_already_requested(self, people):
+        set_loan(people["rope"], "requested", people["mia"], people["inventory"])
+
+        response = client_for(people["olive"]).post(action_url(people, "borrow"))
+
+        assert response.status_code == 409
         assert loan_of(people["rope"]) == ("requested", people["mia"].id, people["inventory"].id)
 
     @pytest.mark.parametrize("who, code", [("stan", 404), ("adam", 403)])
@@ -150,22 +174,36 @@ class TestApproveDeclineReturn:
         assert response.status_code == 400
         assert response.json() == {"borrower_id": ["This field is required."]}
 
-    @pytest.mark.parametrize(
-        "action, status, message",
-        [
-            ("approve", "requested", "You cannot approve or decline your own request."),
-            ("return", "on_loan", "You cannot mark your own loan returned."),
-        ],
-    )
-    def test_the_borrower_cannot_act_on_their_own_loan(self, people, action, status, message):
-        set_loan(people["rope"], status, people["olive"], people["inventory"])
+    @pytest.mark.parametrize("action", ["approve", "decline"])
+    def test_an_admin_cannot_answer_their_own_request(self, people, action):
+        set_loan(people["rope"], "requested", people["olive"], people["inventory"])
 
         response = client_for(people["olive"]).post(
             action_url(people, action), {"borrower_id": people["olive"].id}, format="json"
         )
 
         assert response.status_code == 403
-        assert response.json() == {"detail": message}
+        assert response.json() == {"detail": "You cannot approve or decline your own request."}
+
+    def test_an_admin_marks_their_own_loan_returned(self, people):
+        set_loan(people["rope"], "on_loan", people["olive"], people["inventory"])
+
+        response = client_for(people["olive"]).post(
+            action_url(people, "return"), {"borrower_id": people["olive"].id}, format="json"
+        )
+
+        assert response.status_code == 204
+        assert loan_of(people["rope"]) == ("available", None, None)
+
+    def test_a_member_cannot_mark_their_own_loan_returned(self, people):
+        set_loan(people["rope"], "on_loan", people["mia"], people["inventory"])
+
+        response = client_for(people["mia"]).post(
+            action_url(people, "return"), {"borrower_id": people["mia"].id}, format="json"
+        )
+
+        assert response.status_code == 403
+        assert loan_of(people["rope"])[0] == "on_loan"
 
     def test_a_request_that_changed_conflicts(self, people):
         set_loan(people["rope"], "requested", people["max"], people["inventory"])
@@ -256,6 +294,70 @@ class TestOwnerMarksReturned:
 
         assert response.status_code == 409
 
+    def test_the_owner_ends_their_own_use(self, people):
+        set_loan(people["rope"], "on_loan", people["adam"], None)
+
+        response = client_for(people["adam"]).post(
+            self.url(people["rope"]), {"borrower_id": people["adam"].id}, format="json"
+        )
+
+        assert response.status_code == 204
+        assert loan_of(people["rope"]) == ("available", None, None)
+
+
+@pytest.mark.django_db
+class TestOwnerUses:
+    def url(self, item):
+        return f"/api/items/{item.id}/use/"
+
+    def test_the_owner_puts_their_item_on_loan_to_themselves(self, people):
+        response = client_for(people["adam"]).post(self.url(people["rope"]))
+
+        assert response.status_code == 204
+        assert loan_of(people["rope"]) == ("on_loan", people["adam"].id, None)
+
+    @pytest.mark.parametrize("status", ["requested", "on_loan"])
+    def test_an_item_that_is_not_available_conflicts(self, people, status):
+        set_loan(people["rope"], status, people["mia"], people["inventory"])
+
+        response = client_for(people["adam"]).post(self.url(people["rope"]))
+
+        assert response.status_code == 409
+        assert response.json() == {
+            "detail": "This item has already been requested or is on loan."
+        }
+        assert loan_of(people["rope"]) == (status, people["mia"].id, people["inventory"].id)
+
+    @pytest.mark.parametrize("who", ["mia", "olive", "stan"])
+    def test_anyone_else_is_not_found(self, people, who):
+        response = client_for(people[who]).post(self.url(people["rope"]))
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Item not found."}
+        assert loan_of(people["rope"])[0] == "available"
+
+    def test_an_item_in_use_cannot_be_deleted(self, people):
+        client_for(people["adam"]).post(self.url(people["rope"]))
+
+        response = client_for(people["adam"]).delete(f"/api/items/{people['rope'].id}/")
+
+        assert response.status_code == 409
+
+    def test_a_missing_item_is_not_found(self, people):
+        response = client_for(people["adam"]).post("/api/items/999999/use/")
+
+        assert response.status_code == 404
+
+    def test_using_locks_no_inventory_and_reads_no_listing(self, people):
+        client = client_for(people["adam"])
+
+        with CaptureQueriesContext(connection) as captured:
+            assert client.post(self.url(people["rope"])).status_code == 204
+
+        sent = [q["sql"] for q in captured.captured_queries]
+        assert not any('"gear_library_inventory' in sql for sql in sent), sent
+        assert not any("FOR UPDATE" in sql for sql in sent), sent
+
 
 @pytest.mark.django_db
 class TestListedItems:
@@ -293,6 +395,20 @@ class TestListedItems:
         rope = listed_rope(people, "mia")
 
         assert (rope["borrowed_by_me"], rope["borrower"]) == (True, None)
+
+    def test_an_owner_using_their_item_is_named_to_no_one(self, people):
+        set_loan(people["rope"], "on_loan", people["adam"], None)
+
+        seen = {}
+        for who in ("adam", "olive", "mia"):
+            rope = listed_rope(people, who)
+            seen[who] = (rope["loan_status"], rope["borrowed_by_me"], rope["borrower"])
+
+        assert seen == {
+            "adam": ("on_loan", True, None),
+            "olive": ("on_loan", False, None),
+            "mia": ("on_loan", False, None),
+        }
 
     def test_admins_do_not_see_the_borrower_of_a_loan_through_another_inventory(self, people):
         other = make_inventory("Camping", [(people["adam"], "owner")])
@@ -381,6 +497,7 @@ class TestBorrowing:
                 "loan_status": "requested",
                 "owner": {"first_name": "Adam", "last_name": "L2"},
                 "loan_inventory": {"id": people["inventory"].id, "name": "Climbing"},
+                "can_return": False,
             },
             {
                 "id": tent.id,
@@ -389,6 +506,7 @@ class TestBorrowing:
                 "loan_status": "on_loan",
                 "owner": {"first_name": "Olive", "last_name": "L1"},
                 "loan_inventory": {"id": people["inventory"].id, "name": "Climbing"},
+                "can_return": False,
             },
         ]
         assert self.get(people["max"]) == []
@@ -403,3 +521,85 @@ class TestBorrowing:
         (rope,) = self.get(people["mia"])
 
         assert (rope["loan_status"], rope["loan_inventory"]) == ("on_loan", None)
+
+    def test_the_owners_own_use_can_be_returned(self, people):
+        set_loan(people["rope"], "on_loan", people["adam"], None)
+
+        (rope,) = self.get(people["adam"])
+
+        assert (rope["owner"], rope["loan_inventory"], rope["can_return"]) == (
+            {"first_name": "Adam", "last_name": "L2"},
+            None,
+            True,
+        )
+
+    def test_an_admin_of_the_loan_inventory_can_return_what_they_hold(self, people):
+        tent = Item.objects.create(owner=people["olive"], name="Tent")
+        list_in(people["inventory"], tent)
+        set_loan(tent, "on_loan", people["adam"], people["inventory"])
+
+        (seen,) = self.get(people["adam"])
+
+        assert seen["can_return"] is True
+
+    def test_a_request_cannot_be_returned(self, people):
+        tent = Item.objects.create(owner=people["olive"], name="Tent")
+        list_in(people["inventory"], tent)
+        set_loan(tent, "requested", people["adam"], people["inventory"])
+
+        (seen,) = self.get(people["adam"])
+
+        assert seen["can_return"] is False
+
+    def test_a_holder_who_is_now_a_member_cannot_return_it(self, people):
+        tent = Item.objects.create(owner=people["olive"], name="Tent")
+        list_in(people["inventory"], tent)
+        set_loan(tent, "on_loan", people["adam"], people["inventory"])
+        Membership.objects.filter(user=people["adam"]).update(role="member")
+
+        (seen,) = self.get(people["adam"])
+
+        assert seen["can_return"] is False
+
+    def test_an_admin_cannot_return_what_is_no_longer_listed_in_the_loan_inventory(
+        self, people
+    ):
+        tent = Item.objects.create(owner=people["olive"], name="Tent")
+        set_loan(tent, "on_loan", people["adam"], people["inventory"])
+
+        (seen,) = self.get(people["adam"])
+
+        assert seen["can_return"] is False
+
+    def test_an_admin_elsewhere_cannot_return_a_loan_through_another_inventory(self, people):
+        tent = Item.objects.create(owner=people["olive"], name="Tent")
+        camping = make_inventory("Camping", [(people["olive"], "owner"), (people["mia"], "member")])
+        list_in(camping, tent)
+        list_in(people["inventory"], tent)
+        set_loan(tent, "on_loan", people["mia"], camping)
+        Membership.objects.filter(user=people["mia"], inventory=people["inventory"]).update(
+            role="admin"
+        )
+
+        (seen,) = self.get(people["mia"])
+
+        assert seen["can_return"] is False
+
+    def test_reading_borrowing_does_not_grow_with_the_items(self, people):
+        def count():
+            client = client_for(people["adam"])
+            with CaptureQueriesContext(connection) as captured:
+                assert client.get("/api/borrowing/").status_code == 200
+            return len(captured.captured_queries)
+
+        def hold(name):
+            item = Item.objects.create(owner=people["olive"], name=name)
+            list_in(people["inventory"], item)
+            set_loan(item, "on_loan", people["adam"], people["inventory"])
+
+        hold("Tent")
+        one = count()
+        hold("Stove")
+        hold("Axe")
+
+        assert count() == one

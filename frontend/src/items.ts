@@ -10,7 +10,7 @@ export const LOAN_STATUS_LABELS: Record<LoanStatus, string> = {
   on_loan: "On loan",
 };
 
-interface InventoryRef {
+export interface InventoryRef {
   id: number;
   name: string;
 }
@@ -42,14 +42,40 @@ export interface ListedItem {
   borrower: User | null;
 }
 
-/** An item the signed-in user has requested or borrowed. */
+/** An item the signed-in user has requested or holds. */
 export interface BorrowedItem {
   id: number;
   name: string;
   description: string;
   loan_status: "requested" | "on_loan";
   owner: PersonName;
+  /** `null` once it is deleted, and while the signed-in user uses their own item. */
   loan_inventory: InventoryRef | null;
+  /** True when the signed-in user holds it and may mark it returned themselves. */
+  can_return: boolean;
+}
+
+/** An item the signed-in user can only borrow. */
+export interface DiscoverItem {
+  id: number;
+  name: string;
+  description: string;
+  owner: PersonName;
+  loan_status: LoanStatus;
+  /** True when the signed-in user is the requester or the borrower. */
+  borrowed_by_me: boolean;
+  /** The inventories where the signed-in user is a `member` and it is listed. */
+  inventories: InventoryRef[];
+}
+
+/** A request or loan of someone else that the signed-in user may answer or close. */
+export interface LendingItem extends Omit<Item, "loan_status" | "borrower"> {
+  loan_status: "requested" | "on_loan";
+  borrower: User;
+  /** `null` when the item is the signed-in user's own. */
+  owner: PersonName | null;
+  /** True when the signed-in user may approve or decline the request. */
+  can_answer: boolean;
 }
 
 /** The name, then the description when there is one. */
@@ -57,11 +83,14 @@ export function describeItem(item: { name: string; description: string }): strin
   return item.description ? `${item.name}: ${item.description}` : item.name;
 }
 
-/** "Requested by" or "On loan to", then `borrower` by name and phone number, or "you". */
+/**
+ * "Requested by" or "On loan to", then `borrower` by name and phone number. For "you",
+ * "Waiting for approval" or "Borrowed by you".
+ */
 export function borrowerText(loanStatus: LoanStatus, borrower: User | "you"): string {
-  const who =
-    borrower === "you"
-      ? borrower
-      : `${fullName(borrower)}, ${formatPhoneNumber(borrower.phone_number)}`;
+  if (borrower === "you") {
+    return loanStatus === "requested" ? "Waiting for approval" : "Borrowed by you";
+  }
+  const who = `${fullName(borrower)}, ${formatPhoneNumber(borrower.phone_number)}`;
   return loanStatus === "requested" ? `Requested by ${who}` : `On loan to ${who}`;
 }

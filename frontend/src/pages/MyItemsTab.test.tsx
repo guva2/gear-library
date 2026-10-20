@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { BorrowedItem, Item } from "../items";
+import type { Item } from "../items";
 import { ADA, empty, fakeBackend, json } from "../test-backend";
 import { renderAt } from "../test-render";
 
@@ -32,8 +32,8 @@ function liveBackend(routes: (state: { items: Item[] }) => Routes = () => ({})) 
 }
 
 async function open() {
-  renderAt("/gear");
-  await screen.findByRole("heading", { name: "My gear" });
+  renderAt("/manage/items");
+  await screen.findByRole("region", { name: "My items" });
   await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
 }
 
@@ -52,7 +52,7 @@ function fill(container: HTMLElement, label: string, value: string) {
   fireEvent.change(within(container).getByLabelText(label), { target: { value } });
 }
 
-describe("my gear", () => {
+describe("my items", () => {
   it("shows each item with its description and where it is listed", async () => {
     liveBackend();
 
@@ -92,9 +92,9 @@ describe("my gear", () => {
   it("shows an error when the items cannot be loaded", async () => {
     fakeBackend({ "GET /api/auth/me/": json(200, ADA), "GET /api/items/": json(500, {}) });
 
-    renderAt("/gear");
+    renderAt("/manage/items");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your gear.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your items.");
   });
 });
 
@@ -346,6 +346,58 @@ describe("loans of my items", () => {
     expect(backend.requests("POST /api/items/20/return/")).toEqual([{ borrower_id: MIA.id }]);
   });
 
+  it("uses an available item, then offers Done using it", async () => {
+    const backend = liveBackend((state) => ({
+      "POST /api/items/21/use/": () => {
+        state.items = [{ ...AXE, loan_status: "on_loan", borrower: ADA }, ROPE];
+        return empty(204)({});
+      },
+    }));
+    await open();
+
+    const button = within(itemFor("Axe")).getByRole("button", { name: "Use it myself: Axe" });
+    expect(button).toHaveTextContent(/^Use it myself$/);
+    fireEvent.click(button);
+
+    expect(await within(itemFor("Axe")).findByText("In use by you.")).toBeVisible();
+    const again = within(itemFor("Axe")).getByRole("button", { name: "Done using it: Axe" });
+    expect(again).toBe(button);
+    expect(again).toHaveTextContent(/^Done using it$/);
+    expect(within(itemFor("Axe")).queryByRole("button", { name: /returned$/ })).toBeNull();
+    expect(backend.requests("POST /api/items/21/use/")).toEqual([undefined]);
+  });
+
+  it("is done using an item it uses", async () => {
+    const backend = liveBackend((state) => {
+      state.items = [{ ...AXE, loan_status: "on_loan", borrower: ADA }];
+      return {
+        "POST /api/items/21/return/": () => {
+          state.items = [AXE];
+          return empty(204)({});
+        },
+      };
+    });
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: "Done using it: Axe" }));
+
+    expect(await within(itemFor("Axe")).findByText("Available.")).toBeVisible();
+    expect(backend.requests("POST /api/items/21/return/")).toEqual([{ borrower_id: ADA.id }]);
+  });
+
+  it("offers no way to use a requested or lent item", async () => {
+    liveBackend((state) => {
+      const requested = { loan_status: "requested", borrower: MIA } as const;
+      state.items = [{ ...AXE, ...requested, loan_inventory: ON_LOAN.loan_inventory }, ON_LOAN];
+      return {};
+    });
+
+    await open();
+
+    expect(screen.queryByRole("button", { name: /unavailable$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /available$/ })).toBeNull();
+  });
+
   it("explains why an item on loan cannot be deleted", async () => {
     liveBackend((state) => {
       state.items = [ON_LOAN];
@@ -362,88 +414,6 @@ describe("loans of my items", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This item is on loan. It can be deleted once it is returned.",
-    );
-  });
-});
-
-describe("borrowing", () => {
-  const STOVE: BorrowedItem = {
-    id: 30,
-    name: "Stove",
-    description: "gas",
-    loan_status: "requested",
-    owner: { first_name: "Bob", last_name: "Stone" },
-    loan_inventory: { id: 8, name: "Camping Crew" },
-  };
-  const TENT: BorrowedItem = {
-    ...STOVE,
-    id: 31,
-    name: "Tent",
-    description: "",
-    loan_status: "on_loan",
-    loan_inventory: null,
-  };
-
-  function borrowedTexts() {
-    return within(region("Borrowing"))
-      .getAllByRole("listitem")
-      .map((item) => item.firstChild?.textContent);
-  }
-
-  it("lists the user's requests and the items they hold, with owner and inventory", async () => {
-    liveBackend(() => ({ "GET /api/borrowing/": json(200, [STOVE, TENT]) }));
-
-    await open();
-
-    expect(borrowedTexts()).toEqual([
-      "Stove: gas, owned by Bob Stone. Requested through Camping Crew.",
-      "Tent, owned by Bob Stone. On loan to you.",
-    ]);
-    expect(within(region("Borrowing")).getAllByRole("button")).toHaveLength(1);
-  });
-
-  it("says so when the user has nothing borrowed", async () => {
-    liveBackend();
-
-    await open();
-
-    expect(
-      within(region("Borrowing")).getByText("You have not requested or borrowed anything."),
-    ).toBeVisible();
-  });
-
-  it("cancels a pending request and reloads", async () => {
-    let borrowed = [STOVE, TENT];
-    const backend = liveBackend(() => ({
-      "GET /api/borrowing/": () => json(200, borrowed)({}),
-      "POST /api/borrowing/30/cancel/": () => {
-        borrowed = [TENT];
-        return empty(204)({});
-      },
-    }));
-    await open();
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request for Stove" }));
-
-    await waitFor(() =>
-      expect(borrowedTexts()).toEqual(["Tent, owned by Bob Stone. On loan to you."]),
-    );
-    expect(backend.requests("POST /api/borrowing/30/cancel/")).toEqual([undefined]);
-  });
-
-  it("shows why a cancel was refused", async () => {
-    liveBackend(() => ({
-      "GET /api/borrowing/": json(200, [STOVE]),
-      "POST /api/borrowing/30/cancel/": json(409, {
-        detail: "This request was approved, so it cannot be cancelled.",
-      }),
-    }));
-    await open();
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request for Stove" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This request was approved, so it cannot be cancelled.",
     );
   });
 });

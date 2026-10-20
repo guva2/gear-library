@@ -1,5 +1,5 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import type { FieldErrors } from "./api";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { apiFetch, readErrors, type FieldErrors } from "./api";
 
 interface FieldProps {
   name: string;
@@ -90,4 +90,25 @@ export function Confirmation({ message, confirm, onConfirm, onCancel }: Confirma
       </button>
     </p>
   );
+}
+
+/**
+ * Holds a page's errors and `change`, which sends a change and reloads either way: a refusal
+ * may come from a change someone else made, so the page shows the current state with it.
+ */
+export function useChange(reload: () => void) {
+  const [errors, setErrors] = useState<FieldErrors>({});
+
+  async function change(path: string, method: "POST" | "DELETE", body?: unknown) {
+    setErrors({});
+    try {
+      const response = await apiFetch(path, { method, body });
+      if (!response.ok) setErrors(await readErrors(response, []));
+      reload();
+    } catch {
+      setErrors(unreachable());
+    }
+  }
+
+  return { errors, setErrors, change };
 }

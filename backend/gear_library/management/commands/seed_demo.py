@@ -25,7 +25,8 @@ DEMO_USERS = [
     (SAM, "Sam", "Okafor"),
 ]
 
-# Each inventory's first member is its owner, and is how a later run recognises it.
+# Each inventory's first member is its owner, and is how a later run recognises it. A member
+# is (phone number, role), or (phone number, role, invited by) for one who accepted an invite.
 DEMO_INVENTORIES = [
     {
         "name": "Climbing Club",
@@ -34,7 +35,12 @@ DEMO_INVENTORIES = [
     },
     {
         "name": "Camping Crew",
-        "members": [(JORDAN, Role.OWNER), (SAM, Role.ADMIN)],
+        "members": [(JORDAN, Role.OWNER), (SAM, Role.ADMIN), (AVERY, Role.MEMBER, SAM)],
+        "invites": [],
+    },
+    {
+        "name": "Hiking Group",
+        "members": [(SAM, Role.OWNER)],
         # (invitee, invited by)
         "invites": [(AVERY, SAM)],
     },
@@ -113,12 +119,13 @@ class Command(BaseCommand):
                 continue
             inventory = Inventory.objects.create(name=demo["name"])
             inventories[demo["name"]] = inventory.id
-            for phone_number, role in demo["members"]:
+            for phone_number, role, *inviter in demo["members"]:
                 Membership.objects.create(
                     inventory=inventory,
                     user=users[phone_number],
                     role=role,
                     status=MembershipStatus.ACTIVE,
+                    invited_by=users[inviter[0]] if inviter else None,
                 )
             for invitee, invited_by in demo["invites"]:
                 Membership.objects.create(

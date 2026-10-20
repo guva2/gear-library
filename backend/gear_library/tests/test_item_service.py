@@ -215,9 +215,7 @@ class TestMembershipChangesRemoveListings:
 
 
 INSERT_LISTING = 'INSERT INTO "gear_library_inventoryitem" '
-DELETE_LISTING = 'DELETE FROM "gear_library_inventoryitem" '
 SELECT_ITEM = 'SELECT "gear_library_item".'
-SELECT_INVENTORY = 'SELECT "gear_library_inventory".'
 FOR_UPDATE = " FOR UPDATE"
 
 
@@ -267,7 +265,7 @@ class TestCommittedRaces:
         assert not Item.objects.exists()
         assert not InventoryItem.objects.exists()
 
-    def test_an_item_delete_waits_for_a_listing_and_deletes_it(self, inventory, owner, item):
+    def test_an_item_delete_waits_for_a_listing_and_is_refused(self, inventory, owner, item):
         actor = as_(owner, inventory)
         held, release = threading.Event(), threading.Event()
 
@@ -277,20 +275,21 @@ class TestCommittedRaces:
 
         outcomes = self.race(list_it, lambda: items.delete_item(owner, item.id), held, release)
 
-        assert outcomes == {"first": "ok", "second": "ok"}
-        assert not Item.objects.exists()
-        assert not InventoryItem.objects.exists()
+        assert outcomes["first"] == "ok"
+        assert isinstance(outcomes["second"], Conflict)
+        assert outcomes["second"].detail == "This item changed. Try again."
+        assert Item.objects.filter(pk=item.pk).exists()
+        assert InventoryItem.objects.filter(inventory=inventory, item=item).exists()
 
-    def test_an_item_delete_locks_an_inventory_the_item_was_listed_in_after_it_started(
+    def test_an_item_delete_is_refused_when_the_item_was_listed_after_it_started(
         self, inventory, owner, item
     ):
         """The listing commits after the delete read the item's listings and before it
-        locked the item. The delete must not delete that listing without its inventory's
-        lock, and cannot take that lock while it holds the item row."""
+        locked the item, in an inventory the delete has not locked."""
         list_directly(inventory, item)
         with transaction.atomic():
             camping = inventories.create_inventory(owner, "Camping").inventory
-        statements, listed_elsewhere = [], threading.Event()
+        listed_elsewhere = threading.Event()
 
         def list_it_first(execute, sql, params, many, context):
             is_item_lock = sql.startswith(SELECT_ITEM) and sql.endswith(FOR_UPDATE)
@@ -301,21 +300,13 @@ class TestCommittedRaces:
                     "lister", lambda: items.add_listing(as_(owner, camping), item.id), outcomes
                 ).join(10)
                 assert outcomes == {"lister": "ok"}
-            statements.append((sql, params))
             return execute(sql, params, many, context)
 
         with connection.execute_wrapper(list_it_first):
-            items.delete_item(owner, item.id)
+            with pytest.raises(Conflict) as excinfo:
+                items.delete_item(owner, item.id)
 
-        assert listed_elsewhere.is_set()
-        assert not Item.objects.exists()
-        assert not InventoryItem.objects.exists()
-        first_listing_delete = next(
-            i for i, (sql, _) in enumerate(statements) if sql.startswith(DELETE_LISTING)
-        )
-        inventory_locks = [
-            params
-            for sql, params in statements[:first_listing_delete]
-            if sql.startswith(SELECT_INVENTORY) and sql.endswith(FOR_UPDATE)
-        ]
-        assert any(camping.id in params for params in inventory_locks)
+        assert excinfo.value.detail == "This item changed. Try again."
+        assert Item.objects.filter(pk=item.pk).exists()
+        listed_in = InventoryItem.objects.filter(item=item).values_list("inventory_id", flat=True)
+        assert set(listed_in) == {inventory.id, camping.id}

@@ -12,7 +12,7 @@ from django.db import connection, connections
 from gear_library import inventories
 from gear_library.models import Inventory, InventoryItem, Item, Membership
 
-from .test_inventory_service import connect, wait_for_a_blocked_lock
+from .test_inventory_service import connect, run_in_thread, wait_for_a_blocked_lock
 from .test_items_api import client_for, list_in, make_inventory, make_user
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -247,19 +247,18 @@ def test_a_request_waits_for_the_listing_removal_and_is_not_found(race):
 
 SELECT_INVENTORY = 'SELECT "gear_library_inventory".'
 SELECT_ITEM = 'SELECT "gear_library_item".'
-DELETE_LISTING = 'DELETE FROM "gear_library_inventoryitem" '
 FOR_UPDATE = " FOR UPDATE"
 
 
-def test_an_item_delete_request_starts_again_after_a_listing_it_had_not_locked():
+def test_an_item_delete_request_is_refused_after_a_listing_it_had_not_locked():
     """The listing commits after the delete read the item's listings and before it locked
-    the item. The delete rolls back to before its locks and locks that inventory too."""
+    the item, in an inventory the delete has not locked."""
     owner = make_user(1)
     climbing = make_inventory("Climbing", [(owner, "owner")])
     camping = make_inventory("Camping", [(owner, "owner")])
     rope = Item.objects.create(owner=owner, name="Rope")
     list_in(climbing, rope)
-    statements, responses = [], {}
+    responses = {}
     lister = client_for(owner)
 
     def list_it_first(execute, sql, params, many, context):
@@ -267,22 +266,51 @@ def test_an_item_delete_request_starts_again_after_a_listing_it_had_not_locked()
             body = {"item_id": rope.id}
             send = lambda: lister.post(url(camping, "items/"), body, format="json")
             send_in_thread("lister", send, responses).join(10)
-        statements.append((sql, params))
         return execute(sql, params, many, context)
 
     with connection.execute_wrapper(list_it_first):
         response = client_for(owner).delete(f"/api/items/{rope.id}/")
 
     assert responses["lister"].status_code == 201
-    assert response.status_code == 204
-    assert not Item.objects.exists()
-    assert not InventoryItem.objects.exists()
-    first_listing_delete = next(
-        i for i, (sql, _) in enumerate(statements) if sql.startswith(DELETE_LISTING)
+    assert (response.status_code, response.json()) == (
+        409,
+        {"detail": "This item changed. Try again."},
     )
-    inventory_locks = [
-        params
-        for sql, params in statements[:first_listing_delete]
-        if sql.startswith(SELECT_INVENTORY) and sql.endswith(FOR_UPDATE)
-    ]
-    assert any(camping.id in params for params in inventory_locks)
+    assert Item.objects.filter(pk=rope.pk).exists()
+    listed_in = InventoryItem.objects.filter(item=rope).values_list("inventory_id", flat=True)
+    assert set(listed_in) == {climbing.id, camping.id}
+
+
+
+def test_a_use_waits_for_the_item_delete_and_is_not_found():
+    """The owner's use takes only the item row's lock, so it waits on a delete that holds
+    it, then finds the item gone."""
+    owner = make_user(1)
+    climbing = make_inventory("Climbing", [(owner, "owner")])
+    rope = Item.objects.create(owner=owner, name="Rope")
+    list_in(climbing, rope)
+    held, release = threading.Event(), threading.Event()
+    outcomes, responses = {}, {}
+
+    def delete_when_released():
+        Item.objects.select_for_update().get(pk=rope.pk)
+        held.set()
+        assert release.wait(10)
+        Item.objects.filter(pk=rope.pk).delete()
+
+    deleter = run_in_thread("delete", delete_when_released, outcomes)
+    assert held.wait(10)
+    user = client_for(owner)
+    use = send_in_thread("use", lambda: user.post(f"/api/items/{rope.id}/use/"), responses)
+    try:
+        wait_for_a_blocked_lock()
+    finally:
+        release.set()
+        deleter.join(10)
+        use.join(10)
+
+    assert outcomes["delete"] == "ok"
+    assert (responses["use"].status_code, responses["use"].json()) == (
+        404,
+        {"detail": "Item not found."},
+    )

@@ -51,8 +51,11 @@ ROUTES = {
     ("items/{id}/", "PATCH"),
     ("items/{id}/", "DELETE"),
     ("items/{id}/return/", "POST"),
+    ("items/{id}/use/", "POST"),
     ("borrowing/", "GET"),
     ("borrowing/{id}/cancel/", "POST"),
+    ("discover/", "GET"),
+    ("lending/", "GET"),
 }
 
 
@@ -273,6 +276,8 @@ NOT_FOUND_CASES = [
     ("olive", "patch", "items/{none}/", {"name": "Mine"}, ITEM_NOT_FOUND),
     ("olive", "delete", "items/{none}/", {}, ITEM_NOT_FOUND),
     ("olive", "post", "items/{none}/return/", {"borrower_id": 1}, ITEM_NOT_FOUND),
+    ("adam", "post", "items/{rope}/use/", {}, ITEM_NOT_FOUND),
+    ("olive", "post", "items/{none}/use/", {}, ITEM_NOT_FOUND),
     *(
         (who, "post", f"invites/{{{invite}}}/{action}/", {}, INVITE_NOT_FOUND)
         for who in ["mia", "stan"]

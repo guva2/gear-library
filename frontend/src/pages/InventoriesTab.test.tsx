@@ -23,7 +23,7 @@ describe("my inventories", () => {
   it("lists each inventory with the user's role and a link to its page", async () => {
     signedIn({ "GET /api/inventories/": json(200, [CLIMBING, CAMPING]) });
 
-    renderAt("/");
+    renderAt("/manage/inventories");
 
     const link = await screen.findByRole("link", { name: "Climbing Club" });
     expect(link).toHaveAttribute("href", "/inventories/7");
@@ -35,22 +35,10 @@ describe("my inventories", () => {
     expect(screen.getByText("Signed in as Ada Lovelace")).toBeInTheDocument();
   });
 
-  it("links to My gear and My connections", async () => {
-    signedIn();
-
-    renderAt("/");
-
-    expect(await screen.findByRole("link", { name: "My gear" })).toHaveAttribute("href", "/gear");
-    expect(screen.getByRole("link", { name: "My connections" })).toHaveAttribute(
-      "href",
-      "/connections",
-    );
-  });
-
   it("says so when the user has no inventories or invites", async () => {
     signedIn();
 
-    renderAt("/");
+    renderAt("/manage/inventories");
 
     expect(await screen.findByText("You are not in any inventory yet.")).toBeInTheDocument();
     expect(screen.getByText("No pending invites.")).toBeInTheDocument();
@@ -59,7 +47,7 @@ describe("my inventories", () => {
   it("shows an error when the lists cannot be loaded", async () => {
     signedIn({ "GET /api/inventories/": json(500, {}) });
 
-    renderAt("/");
+    renderAt("/manage/inventories");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not load your inventories.",
@@ -74,7 +62,7 @@ describe("my inventories", () => {
       "GET /api/inventories/9/invites/": json(200, []),
       "GET /api/inventories/9/items/": json(200, []),
     });
-    renderAt("/");
+    renderAt("/manage/inventories");
     await screen.findByText("You are not in any inventory yet.");
 
     fillIn("Inventory name", "Kayaks");
@@ -88,7 +76,7 @@ describe("my inventories", () => {
     signedIn({
       "POST /api/inventories/": json(400, { name: ["This field may not be blank."] }),
     });
-    renderAt("/");
+    renderAt("/manage/inventories");
     await screen.findByText("You are not in any inventory yet.");
 
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
@@ -103,7 +91,7 @@ describe("pending invites", () => {
   it("shows the inventory's name and who sent the invite", async () => {
     signedIn({ "GET /api/invites/": json(200, [INVITE]) });
 
-    renderAt("/");
+    renderAt("/manage/inventories");
 
     expect(await screen.findByText("Camping Crew, from Sam Okafor")).toBeInTheDocument();
   });
@@ -120,7 +108,7 @@ describe("pending invites", () => {
         return json(200, CAMPING)({});
       },
     });
-    renderAt("/");
+    renderAt("/manage/inventories");
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept invite to Camping Crew" }));
 
@@ -138,7 +126,7 @@ describe("pending invites", () => {
         return empty(204)({});
       },
     });
-    renderAt("/");
+    renderAt("/manage/inventories");
 
     fireEvent.click(await screen.findByRole("button", { name: "Decline invite to Camping Crew" }));
 
@@ -151,7 +139,7 @@ describe("pending invites", () => {
       "GET /api/invites/": json(200, [INVITE]),
       "POST /api/invites/30/accept/": json(404, { detail: "Invite not found." }),
     });
-    renderAt("/");
+    renderAt("/manage/inventories");
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept invite to Camping Crew" }));
 
