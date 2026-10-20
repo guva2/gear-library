@@ -109,7 +109,9 @@ describe("discover", () => {
     fireEvent.click(within(card("Axe")).getByRole("button", { name: "Request Axe" }));
 
     expect(await within(card("Axe")).findByText("Requested by you")).toBeInTheDocument();
-    expect(within(card("Axe")).getByRole("heading", { name: "Axe" })).toHaveFocus();
+    await waitFor(() =>
+      expect(within(card("Axe")).getByRole("heading", { name: "Axe" })).toHaveFocus(),
+    );
     expect(backend.requests("POST /api/inventories/7/items/21/borrow/")).toEqual([undefined]);
   });
 
@@ -148,7 +150,9 @@ describe("discover", () => {
     fireEvent.click(within(card("Rope")).getByRole("button", { name: "Send request" }));
 
     expect(await within(card("Rope")).findByText("Requested by you")).toBeInTheDocument();
-    expect(within(card("Rope")).getByRole("heading", { name: "Rope" })).toHaveFocus();
+    await waitFor(() =>
+      expect(within(card("Rope")).getByRole("heading", { name: "Rope" })).toHaveFocus(),
+    );
   });
 
   it("closes the inventory choice on Cancel without requesting", async () => {
@@ -159,7 +163,9 @@ describe("discover", () => {
     fireEvent.click(within(card("Rope")).getByRole("button", { name: "Cancel" }));
 
     expect(within(card("Rope")).queryByLabelText("Request through")).toBeNull();
-    expect(within(card("Rope")).getByRole("button", { name: "Request Rope" })).toHaveFocus();
+    await waitFor(() =>
+      expect(within(card("Rope")).getByRole("button", { name: "Request Rope" })).toHaveFocus(),
+    );
     expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(0);
   });
 

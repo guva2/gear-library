@@ -116,6 +116,17 @@ describe("as an admin", () => {
     );
   });
 
+  it("puts the members table in a labelled box that can be focused to scroll it", async () => {
+    asRole("admin");
+
+    await open();
+
+    const box = within(region("Members")).getByRole("region", { name: "Members table" });
+    expect(box).toHaveClass("table-scroll");
+    expect(box).toHaveAttribute("tabindex", "0");
+    expect(within(box).getByRole("table")).toBeInTheDocument();
+  });
+
   it("cannot change roles, remove members, rename or delete", async () => {
     asRole("admin");
 
@@ -1007,7 +1018,10 @@ describe("loading", () => {
     renderAt("/inventories/7");
 
     expect(await screen.findByText("Inventory not found.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Back to my inventories" })).toHaveAttribute(
+      "href",
+      "/manage/inventories",
+    );
   });
 
   it("shows not-found for an id that is not a number, without calling the API", async () => {

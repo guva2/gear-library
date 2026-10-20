@@ -84,7 +84,7 @@ export default function InventoryPage() {
 function NotFound() {
   return (
     <p>
-      Inventory not found. <Link to="/">Go home</Link>
+      Inventory not found. <Link to="/manage/inventories">Back to my inventories</Link>
     </p>
   );
 }
@@ -230,54 +230,57 @@ function MemberTable({ members, ownerId, onSetRole, onRemove }: MemberTableProps
   return (
     <section aria-labelledby="members">
       <h3 id="members">Members</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Phone number</th>
-            <th>Role</th>
-            {controls && <th>Remove</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {members.map((member) => (
-            <tr key={member.id}>
-              <td>{fullName(member)}</td>
-              <td>{formatPhoneNumber(member.phone_number)}</td>
-              <td>
-                {controls ? (
-                  <select
-                    aria-label={`Role for ${fullName(member)}`}
-                    value={member.role}
-                    onChange={(event) => pickRole(member, event.target.value as Role)}
-                  >
-                    {ROLES.map((role) => (
-                      <option key={role} value={role}>
-                        {role}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  member.role
-                )}
-              </td>
-              {controls && (
+      {/* Focusable so a keyboard user can scroll it when the table is wider than the screen. */}
+      <div className="table-scroll" role="region" aria-label="Members table" tabIndex={0}>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Phone number</th>
+              <th>Role</th>
+              {controls && <th>Remove</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((member) => (
+              <tr key={member.id}>
+                <td>{fullName(member)}</td>
+                <td>{formatPhoneNumber(member.phone_number)}</td>
                 <td>
-                  {member.id !== ownerId && (
-                    <button
-                      type="button"
-                      aria-label={`Remove ${fullName(member)}`}
-                      onClick={() => onRemove(member)}
+                  {controls ? (
+                    <select
+                      aria-label={`Role for ${fullName(member)}`}
+                      value={member.role}
+                      onChange={(event) => pickRole(member, event.target.value as Role)}
                     >
-                      Remove
-                    </button>
+                      {ROLES.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    member.role
                   )}
                 </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                {controls && (
+                  <td>
+                    {member.id !== ownerId && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${fullName(member)}`}
+                        onClick={() => onRemove(member)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {controls && ownRole && (
         <Confirmation
           message={`Change your role to ${ownRole.role}? You will no longer be an owner.`}

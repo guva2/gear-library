@@ -136,10 +136,15 @@ fieldset {
   margin: 0 0 0.75rem;
 }
 
+/* A table wider than the screen scrolls inside this box, not the whole page. */
+.table-scroll {
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
-  margin-bottom: 0.75rem;
 }
 
 th,
@@ -250,6 +255,8 @@ section > ul > li > p:last-child {
   padding: 1.5rem 2rem;
   max-width: 60rem;
   width: 100%;
+  /* A grid item will not shrink below its content width unless told to. */
+  min-width: 0;
 }
 
 /* Narrow screens: the sidebar becomes a top bar. */

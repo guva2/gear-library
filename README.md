@@ -28,9 +28,9 @@ docker compose up --build
 ```
 
 Open <http://localhost:5173>, then create an account or log in as a demo user (see
-[Demo data](#demo-data)). The home page checks once on load whether the backend and
-database are up. On a first start the backend may still be migrating, so reload the page
-to check again.
+[Demo data](#demo-data)). After you log in, the sidebar footer shows whether the backend
+and database are up. It checks once, when the page loads. On a first start the backend
+may still be migrating, so reload the page to check again.
 
 `docker compose up` starts three services:
 
