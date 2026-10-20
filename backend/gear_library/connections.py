@@ -4,6 +4,9 @@ A pair of users has at most one `Connection` row. A pending row is a request fro
 `requested_by` to the other user; an accepted row connects them both ways. Declining,
 cancelling and removing delete the row, so a pair keeps no history and can start again.
 
+Accepting the other user's request runs an update and then a read, and expects to run
+inside the caller's transaction.
+
 No action takes an explicit lock. Requesting inserts a pending row, and the unique index
 on the pair refuses it when the pair already has a row. The request then accepts the
 other user's pending request with one conditional update, or gets `Conflict`. Accepting is

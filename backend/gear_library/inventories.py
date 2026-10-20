@@ -4,6 +4,9 @@ A membership is `active` or `pending`; a pending one is an invite. Every access 
 reads memberships through `Membership.objects.active()`, so a pending member is a
 non-member everywhere outside the invite actions.
 
+Functions that run several statements (creating, deleting, role changes, removing a member,
+accepting an invite) expect to run inside the caller's transaction.
+
 The functions that take `actor`, the caller's membership, run with the inventory row
 locked by `lock_inventory`. Changes to one inventory therefore run one at a time, and each
 sees the memberships and owners as they are. Leaving, being removed and taking the

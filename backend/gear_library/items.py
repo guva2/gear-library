@@ -3,6 +3,8 @@
 Only an item's owner creates, edits and deletes it. Editing is one conditional update on
 the item's id and owner. An item that is gone or not the caller's gets `NotFound`.
 
+`remove_listing` runs two statements and expects to run inside the caller's transaction.
+
 Listing and removing a listing run with the inventory row locked by
 `inventories.lock_inventory`. Listing then locks the item row, and removing a listing
 cancels a pending request made through the inventory. Inventory rows are locked before

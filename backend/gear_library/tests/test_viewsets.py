@@ -129,7 +129,7 @@ def test_every_change_under_an_inventory_locks_it_before_any_other_query(path, m
     assert sent and locks(sent[0], inventory), sent[:1]
 
 
-CANDIDATE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+CANDIDATE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "DESTROY", "LIST"]
 UNSERVED = sorted(
     (path, method)
     for path in {path for path, _ in SCOPED}
@@ -149,7 +149,7 @@ def test_a_method_the_route_does_not_serve_is_405_and_takes_no_lock(path, method
 
     sent = queries_of(
         lambda: responses.append(
-            getattr(client, method.lower())(scoped_url(path, inventory), {}, format="json")
+            client.generic(method, scoped_url(path, inventory), "{}", "application/json")
         )
     )
 
@@ -165,8 +165,9 @@ def test_a_logged_out_caller_is_forbidden_on_a_method_the_route_does_not_serve(
     owner = make_user(1)
     inventory = make_inventory("Climbing", [(owner, "owner")])
 
-    send = getattr(APIClient(), method.lower())
-    response = send(scoped_url(path, inventory), {}, format="json")
+    response = APIClient().generic(
+        method, scoped_url(path, inventory), "{}", "application/json"
+    )
 
     assert response.status_code == 403
 

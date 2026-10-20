@@ -223,7 +223,8 @@ class InventoryScopedViewSet(ApiViewSet):
         super().perform_authentication(request)
         if not request.user.is_authenticated:
             return
-        if not hasattr(self, request.method.lower()):
+        method = request.method.lower()
+        if method not in self.http_method_names or not hasattr(self, method):
             raise MethodNotAllowed(request.method)
         if request.method not in SAFE_METHODS:
             inventories.lock_inventory(self.inventory_id())

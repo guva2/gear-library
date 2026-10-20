@@ -22,6 +22,9 @@ behind "who may call" are in [`schema.md`](schema.md).
   - `409`: the object is in a state that does not allow the action, for example an item
     that is already requested, or a request that changed after the caller saw it.
 
+- `HEAD` is answered wherever `GET` is. `OPTIONS` describes the view, and on a route
+  scoped to an inventory it is refused to non-members like any other request.
+
 ## Health (M2)
 
 | Method | Path | Who | Result |
