@@ -128,6 +128,34 @@ def test_every_change_under_an_inventory_locks_it_before_any_other_query(path, m
     assert sent and locks(sent[0], inventory), sent[:1]
 
 
+CHANGING_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+UNSERVED = sorted(
+    (path, method)
+    for path in {path for path, _ in SCOPED}
+    for method in CHANGING_METHODS
+    if (path, method) not in ROUTES
+)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("who", ["owner", "member", "stranger"])
+@pytest.mark.parametrize("path, method", UNSERVED)
+def test_a_method_the_route_does_not_serve_is_405_and_takes_no_lock(path, method, who):
+    owner, member, stranger = make_user(1), make_user(2), make_user(3)
+    inventory = make_inventory("Climbing", [(owner, "owner"), (member, "member")])
+    client = client_for({"owner": owner, "member": member, "stranger": stranger}[who])
+    responses = []
+
+    sent = queries_of(
+        lambda: responses.append(
+            getattr(client, method.lower())(scoped_url(path, inventory), {}, format="json")
+        )
+    )
+
+    assert responses[0].status_code == 405
+    assert not any("FOR UPDATE" in sql for sql in sent)
+
+
 @pytest.mark.django_db
 @pytest.mark.parametrize("path, method", [route for route in SCOPED if route[1] == "GET"])
 def test_reads_under_an_inventory_take_no_lock(path, method):
@@ -294,6 +322,15 @@ class TestMembersLeavingAndRemoving:
 
 
 @pytest.mark.django_db
+def test_removing_every_member_at_once_is_not_allowed(people):
+    url = f"/api/inventories/{people['inventory'].id}/members/"
+
+    response = client_for(people["olive"]).delete(url)
+
+    assert response.status_code == 405
+
+
+@pytest.mark.django_db
 class TestActingOnAnotherMembersItem:
     """Only removing a listing is limited to the caller's own items."""
 
@@ -327,3 +364,12 @@ class TestActingOnAnotherMembersItem:
 
         assert response.status_code == 403
         assert response.json() == {"detail": "Only owners can remove other people's items."}
+
+    @pytest.mark.parametrize("action", ["approve", "decline", "return"])
+    def test_a_bad_body_is_refused_before_the_listing_is_looked_up(self, people, action):
+        url = f"/api/inventories/{people['inventory'].id}/items/{people['tent'].id}/{action}/"
+
+        response = client_for(people["adam"]).post(url, {}, format="json")
+
+        assert response.status_code == 400
+        assert response.json() == {"borrower_id": ["This field is required."]}

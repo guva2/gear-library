@@ -6,8 +6,6 @@ from . import views
 
 router = SimpleRouter(use_regex_path=False)
 router.register("auth", views.AuthViewSet, basename="auth")
-# Registered before the list views on the same prefix: the nested routes take their
-# inventory lookup from the first viewset registered there.
 router.register("inventories", views.InventoryViewSet, basename="inventory")
 router.register("inventories", views.InventoryListViewSet, basename="inventories")
 router.register("invites", views.InviteViewSet, basename="invite")

@@ -15,7 +15,7 @@ from rest_framework.decorators import (
     authentication_classes,
     permission_classes,
 )
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import MethodNotAllowed, NotFound, ValidationError
 from rest_framework.permissions import SAFE_METHODS, AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
@@ -201,6 +201,9 @@ class InventoryScopedViewSet(ApiViewSet):
     transaction ends. The role checked therefore stays the caller's until the change
     commits. Reads take no lock.
 
+    A method the view has no handler for is answered 405 before the lock and
+    `InventoryRole`.
+
     `InventoryRole` runs before the body is read, so a non-member gets 404 and a member
     without `required_role` gets 403 whatever they send. Actions read the caller's
     membership as `request.membership`.
@@ -215,10 +218,13 @@ class InventoryScopedViewSet(ApiViewSet):
         return Role.MEMBER
 
     def perform_authentication(self, request):
-        super().perform_authentication(request)
-        # `initial()` calls this after authenticating and before checking permissions. The
+        # `initial()` calls this first, before the permission checks. A method the view
+        # does not serve is answered 405 before anything locks or reads membership. The
         # browsable API and OPTIONS check permissions on copies of the request without
         # calling it, so they take no lock.
+        if not hasattr(self, request.method.lower()):
+            raise MethodNotAllowed(request.method)
+        super().perform_authentication(request)
         if request.method not in SAFE_METHODS and request.user.is_authenticated:
             inventories.lock_inventory(self.inventory_id())
 
@@ -339,6 +345,7 @@ class ListingViewSet(InventoryScopedViewSet):
         return _no_content()
 
     def _change_loan(self, change):
+        # The body is checked before the listing is looked up.
         borrower_id = _validated(BorrowerIdSerializer, self.request)["borrower_id"]
         change(self.request.user, self.get_object(), borrower_id)
         return _no_content()

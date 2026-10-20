@@ -110,7 +110,6 @@ def rename_inventory(actor, name):
     return actor
 
 
-@transaction.atomic
 def delete_inventory(actor):
     """`actor` must be an owner."""
     # First: the delete sets `loan_inventory` to null, and `gear_library_item_loan_state`
@@ -119,7 +118,6 @@ def delete_inventory(actor):
     actor.inventory.delete()
 
 
-@transaction.atomic
 def set_role(actor, member_user_id, role):
     """`actor` must be an owner."""
     target = _target_membership(actor.inventory_id, member_user_id)
@@ -133,7 +131,6 @@ def set_role(actor, member_user_id, role):
     return target
 
 
-@transaction.atomic
 def remove_member(actor, member_user_id):
     """Removes the member `member_user_id`. Removing yourself is leaving, which any member
     may do; to remove someone else, `actor` must be an owner."""
@@ -185,9 +182,8 @@ def accept_invite(invite):
     """Activates the pending membership and returns it. Accepting a membership that is
     already active returns it unchanged."""
     this = Membership.objects.filter(pk=invite.pk)
-    with transaction.atomic():
-        this.pending().update(status=MembershipStatus.ACTIVE)
-        membership = this.active().select_related("inventory").first()
+    this.pending().update(status=MembershipStatus.ACTIVE)
+    membership = this.active().select_related("inventory").first()
     if membership is None:
         raise NotFound(INVITE_NOT_FOUND)
     return membership

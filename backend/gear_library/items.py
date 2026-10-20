@@ -80,7 +80,6 @@ def delete_item(user, item_id):
             pass
 
 
-@transaction.atomic
 def add_listing(actor, item_id):
     """Lists the item `item_id` in the actor's inventory. `actor`, the caller's membership,
     must be an admin or owner."""
@@ -96,7 +95,6 @@ def add_listing(actor, item_id):
         raise
 
 
-@transaction.atomic
 def remove_listing(listing):
     """Removes the listing and cancels a pending request made through its inventory."""
     listing.delete()

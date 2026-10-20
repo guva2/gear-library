@@ -411,11 +411,13 @@ def wait_for_a_blocked_lock(timeout=5.0):
 
 
 def run_in_thread(name, action, outcomes):
-    """Runs `action` on its own database connection, recording "ok" or the error raised."""
+    """Runs `action` in a transaction on its own database connection, as a request does,
+    recording "ok" or the error raised."""
 
     def target():
         try:
-            action()
+            with transaction.atomic():
+                action()
             outcomes[name] = "ok"
         except Exception as error:
             outcomes[name] = error
