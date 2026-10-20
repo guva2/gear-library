@@ -25,7 +25,6 @@ export function empty(status: number): Handler {
 // items to discover.
 const DEFAULTS: Record<string, Handler> = {
   "GET /api/auth/csrf/": empty(204),
-  "GET /api/health/": json(200, { status: "ok", database: "ok" }),
   "GET /api/inventories/": json(200, []),
   "GET /api/invites/": json(200, []),
   "GET /api/connections/": json(200, []),

@@ -8,6 +8,7 @@ import {
   useChange,
   useFocusFirstInvalid,
 } from "../forms";
+import { useAuth } from "../auth";
 import { getJson } from "../inventories";
 import { borrowerText, describeItem, type Item } from "../items";
 import { useLoad } from "../load";
@@ -24,8 +25,14 @@ function listedIn(item: Item): string {
   return `Listed in ${item.inventories.map((inventory) => inventory.name).join(", ")}.`;
 }
 
-function loanState(item: Item): string {
+/** True while the signed-in user, the item's owner, uses it. */
+function inUse(item: Item, userId: number | undefined): boolean {
+  return item.loan_status === "on_loan" && item.borrower?.id === userId;
+}
+
+function loanState(item: Item, userId: number | undefined): string {
   if (!item.borrower) return "Available.";
+  if (inUse(item, userId)) return "In use by you.";
   const state = borrowerText(item.loan_status, item.borrower);
   return item.loan_inventory ? `${state}, through ${item.loan_inventory.name}.` : `${state}.`;
 }
@@ -53,6 +60,7 @@ export default function MyItemsTab() {
           onReturn={(item, borrowerId) =>
             change(`/api/items/${item.id}/return/`, "POST", { borrower_id: borrowerId })
           }
+          onUse={(item) => change(`/api/items/${item.id}/use/`, "POST")}
         />
       )}
       <AddItem reload={reload} onSubmit={() => setErrors({})} />
@@ -70,9 +78,19 @@ interface ItemListProps {
   onDelete: (item: Item) => void;
   /** Called with the borrower the page showed. */
   onReturn: (item: Item, borrowerId: number) => void;
+  onUse: (item: Item) => void;
 }
 
-function ItemList({ items, reload, onSubmit, onGone, onDelete, onReturn }: ItemListProps) {
+function ItemList({
+  items,
+  reload,
+  onSubmit,
+  onGone,
+  onDelete,
+  onReturn,
+  onUse,
+}: ItemListProps) {
+  const { user } = useAuth();
   const [editing, setEditing] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<Item | null>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -119,7 +137,7 @@ function ItemList({ items, reload, onSubmit, onGone, onDelete, onReturn }: ItemL
                 <>
                   <p>{describeItem(item)}</p>
                   <p>{listedIn(item)}</p>
-                  <p>{loanState(item)}</p>
+                  <p>{loanState(item, user?.id)}</p>
                   <p>
                     <button
                       type="button"
@@ -136,18 +154,13 @@ function ItemList({ items, reload, onSubmit, onGone, onDelete, onReturn }: ItemL
                     >
                       Delete
                     </button>
-                    {item.loan_status === "on_loan" && item.borrower && (
-                      <>
-                        {" "}
-                        <button
-                          type="button"
-                          aria-label={`Mark ${item.name} returned`}
-                          onClick={() => item.borrower && onReturn(item, item.borrower.id)}
-                        >
-                          Mark returned
-                        </button>
-                      </>
-                    )}
+                    {" "}
+                    <LoanButton
+                      item={item}
+                      inUse={inUse(item, user?.id)}
+                      onReturn={onReturn}
+                      onUse={onUse}
+                    />
                   </p>
                 </>
               )}
@@ -167,6 +180,42 @@ function ItemList({ items, reload, onSubmit, onGone, onDelete, onReturn }: ItemL
         />
       )}
     </section>
+  );
+}
+
+interface LoanButtonProps {
+  item: Item;
+  inUse: boolean;
+  onReturn: (item: Item, borrowerId: number) => void;
+  onUse: (item: Item) => void;
+}
+
+/**
+ * Mark unavailable while the item is available, Mark available while the owner uses it, and
+ * Mark returned while someone else has it on loan. One button, so focus stays on it when
+ * the item changes state.
+ */
+function LoanButton({ item, inUse, onReturn, onUse }: LoanButtonProps) {
+  const borrower = item.borrower;
+  let action: { label: string; name: string; run: () => void };
+  if (item.loan_status === "available") {
+    action = {
+      label: "Mark unavailable",
+      name: `Mark ${item.name} unavailable`,
+      run: () => onUse(item),
+    };
+  } else if (item.loan_status === "on_loan" && borrower) {
+    const run = () => onReturn(item, borrower.id);
+    action = inUse
+      ? { label: "Mark available", name: `Mark ${item.name} available`, run }
+      : { label: "Mark returned", name: `Mark ${item.name} returned`, run };
+  } else {
+    return null;
+  }
+  return (
+    <button type="button" aria-label={action.name} onClick={action.run}>
+      {action.label}
+    </button>
   );
 }
 

@@ -1,5 +1,5 @@
 import type { User } from "./auth";
-import { fullName, type PersonName } from "./inventories";
+import { fullName, type PersonName, type Role } from "./inventories";
 import { formatPhoneNumber } from "./phone";
 
 export type LoanStatus = "available" | "requested" | "on_loan";
@@ -42,14 +42,17 @@ export interface ListedItem {
   borrower: User | null;
 }
 
-/** An item the signed-in user has requested or borrowed. */
+/** An item the signed-in user has requested or holds. */
 export interface BorrowedItem {
   id: number;
   name: string;
   description: string;
   loan_status: "requested" | "on_loan";
   owner: PersonName;
+  /** `null` once it is deleted, and while the signed-in user uses their own item. */
   loan_inventory: InventoryRef | null;
+  /** True when the signed-in user holds it and may mark it returned themselves. */
+  can_return: boolean;
 }
 
 /** An item listed in the signed-in user's inventories that someone else owns. */
@@ -61,8 +64,8 @@ export interface DiscoverItem {
   loan_status: LoanStatus;
   /** True when the signed-in user is the requester or the borrower. */
   borrowed_by_me: boolean;
-  /** The signed-in user's inventories it is listed in. */
-  inventories: InventoryRef[];
+  /** The signed-in user's inventories it is listed in, with their role in each. */
+  inventories: (InventoryRef & { role: Role })[];
 }
 
 /** A request or loan of someone else that the signed-in user may answer or close. */

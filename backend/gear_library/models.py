@@ -220,7 +220,7 @@ class ItemQuerySet(models.QuerySet):
 class Item(models.Model):
     """A piece of gear. Its loan state is on this row: `borrower` is the requester while
     `requested` and the borrower while `on_loan`, and `loan_inventory` is the inventory the
-    request was made through."""
+    request or loan was made through. The owner as `borrower` is the owner using the item."""
 
     owner = models.ForeignKey(User, on_delete=models.PROTECT, related_name="items")
     name = models.CharField(max_length=64)
@@ -258,9 +258,12 @@ class Item(models.Model):
                 | models.Q(loan_status=LoanStatus.ON_LOAN, borrower__isnull=False),
                 name="gear_library_item_loan_state",
             ),
+            # The owner holds their own item only on loan with no loan inventory: they use
+            # it without asking anyone.
             models.CheckConstraint(
-                condition=~models.Q(borrower=models.F("owner")),
-                name="gear_library_item_borrower_not_owner",
+                condition=~models.Q(borrower=models.F("owner"))
+                | models.Q(loan_status=LoanStatus.ON_LOAN, loan_inventory__isnull=True),
+                name="gear_library_item_owner_use",
             ),
         ]
 

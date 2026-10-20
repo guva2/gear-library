@@ -3,7 +3,6 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "./api";
 import { useAuth } from "./auth";
 import { FormErrors, unreachable } from "./forms";
-import HealthStatus from "./HealthStatus";
 
 /** The logged-out pages (login, register, not found): one centered panel, no sidebar. */
 export function PublicLayout() {
@@ -99,7 +98,6 @@ function SidebarFooter() {
       <button type="button" onClick={logOut}>
         Log out
       </button>
-      <HealthStatus />
     </footer>
   );
 }

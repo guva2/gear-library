@@ -6,13 +6,15 @@ import { fillIn, renderAt } from "./test-render";
 const ANONYMOUS = json(403, { detail: "Authentication credentials were not provided." });
 
 describe("home page", () => {
-  it("shows who is signed in and the health line", async () => {
-    fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
+  it("shows who is signed in, with no health line", async () => {
+    const backend = fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
 
     renderAt("/");
 
     expect(await screen.findByText("Signed in as Ada Lovelace")).toBeInTheDocument();
-    expect(await screen.findByText("Backend and database are ok.")).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Discover" });
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(backend.requests("GET /api/health/")).toHaveLength(0);
   });
 
   it("sends an anonymous user to the login page", async () => {

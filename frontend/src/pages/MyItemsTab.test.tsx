@@ -346,6 +346,56 @@ describe("loans of my items", () => {
     expect(backend.requests("POST /api/items/20/return/")).toEqual([{ borrower_id: MIA.id }]);
   });
 
+  it("marks an available item unavailable, then offers to mark it available", async () => {
+    const backend = liveBackend((state) => ({
+      "POST /api/items/21/use/": () => {
+        state.items = [{ ...AXE, loan_status: "on_loan", borrower: ADA }, ROPE];
+        return empty(204)({});
+      },
+    }));
+    await open();
+
+    const button = within(itemFor("Axe")).getByRole("button", { name: "Mark Axe unavailable" });
+    fireEvent.click(button);
+
+    expect(await within(itemFor("Axe")).findByText("In use by you.")).toBeVisible();
+    const again = within(itemFor("Axe")).getByRole("button", { name: "Mark Axe available" });
+    expect(again).toBe(button);
+    expect(within(itemFor("Axe")).queryByRole("button", { name: /returned$/ })).toBeNull();
+    expect(backend.requests("POST /api/items/21/use/")).toEqual([undefined]);
+  });
+
+  it("marks an item in use available as its holder", async () => {
+    const backend = liveBackend((state) => {
+      state.items = [{ ...AXE, loan_status: "on_loan", borrower: ADA }];
+      return {
+        "POST /api/items/21/return/": () => {
+          state.items = [AXE];
+          return empty(204)({});
+        },
+      };
+    });
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark Axe available" }));
+
+    expect(await within(itemFor("Axe")).findByText("Available.")).toBeVisible();
+    expect(backend.requests("POST /api/items/21/return/")).toEqual([{ borrower_id: ADA.id }]);
+  });
+
+  it("offers no way to mark a requested or lent item unavailable", async () => {
+    liveBackend((state) => {
+      const requested = { loan_status: "requested", borrower: MIA } as const;
+      state.items = [{ ...AXE, ...requested, loan_inventory: ON_LOAN.loan_inventory }, ON_LOAN];
+      return {};
+    });
+
+    await open();
+
+    expect(screen.queryByRole("button", { name: /unavailable$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /available$/ })).toBeNull();
+  });
+
   it("explains why an item on loan cannot be deleted", async () => {
     liveBackend((state) => {
       state.items = [ON_LOAN];

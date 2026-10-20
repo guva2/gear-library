@@ -157,9 +157,18 @@ class TestLoanColumns:
         with pytest.raises(IntegrityError, match="gear_library_item_loan_status_valid"):
             set_loan(item, loan_status="lost")
 
-    def test_the_owner_cannot_be_the_borrower(self, item, ada, inventory):
-        with pytest.raises(IntegrityError, match="gear_library_item_borrower_not_owner"):
-            set_loan(item, loan_status="on_loan", borrower=ada, loan_inventory=inventory)
+    def test_the_owner_holds_their_item_on_loan_with_no_loan_inventory(self, item, ada):
+        set_loan(item, loan_status="on_loan", borrower=ada)
+
+        item.refresh_from_db()
+        assert (item.loan_status, item.borrower, item.loan_inventory) == ("on_loan", ada, None)
+
+    @pytest.mark.parametrize("status", ["requested", "on_loan"])
+    def test_the_owner_cannot_hold_their_item_through_an_inventory(
+        self, item, ada, inventory, status
+    ):
+        with pytest.raises(IntegrityError, match="gear_library_item_owner_use"):
+            set_loan(item, loan_status=status, borrower=ada, loan_inventory=inventory)
 
     def test_deleting_a_borrower_is_refused(self, item, bea):
         set_loan(item, loan_status="on_loan", borrower=bea)

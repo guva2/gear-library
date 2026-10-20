@@ -62,7 +62,8 @@ def listing_of(inventory, item):
 
 
 def request(user, inventory, item):
-    loans.request_item(user, listing_of(inventory, item))
+    membership = Membership.objects.get(inventory=inventory, user=user)
+    loans.borrow(membership, listing_of(inventory, item))
 
 
 @pytest.mark.django_db
@@ -90,6 +91,18 @@ class TestRequest:
 
         with pytest.raises(Conflict):
             request(people["mia"], people["inventory"], people["rope"])
+
+    def test_an_owner_of_the_inventory_takes_the_item_on_loan_at_once(self, people):
+        request(people["olive"], people["inventory"], people["rope"])
+
+        assert loan_of(people["rope"]) == ("on_loan", people["olive"].id, people["inventory"].id)
+
+    def test_an_owner_of_the_inventory_cannot_take_an_item_on_loan(self, people):
+        set_loan(people["rope"], "on_loan", people["max"], None)
+
+        with pytest.raises(Conflict):
+            request(people["olive"], people["inventory"], people["rope"])
+        assert loan_of(people["rope"]) == ("on_loan", people["max"].id, None)
 
 
 @pytest.mark.django_db
@@ -125,7 +138,7 @@ class TestApproveAndDecline:
 
     @pytest.mark.parametrize("action", ["approve", "decline"])
     def test_an_owner_cannot_approve_or_decline_their_own_request(self, people, action):
-        request(people["olive"], people["inventory"], people["rope"])
+        set_loan(people["rope"], "requested", people["olive"], people["inventory"])
 
         with pytest.raises(PermissionDenied):
             getattr(self, action)(people["olive"], people, people["olive"])
@@ -173,12 +186,12 @@ class TestMarkReturnedThroughTheInventory:
 
         assert loan_of(on_loan["rope"]) == available()
 
-    def test_the_borrower_cannot_mark_their_own_loan_returned(self, people):
+    def test_an_owner_of_the_inventory_marks_their_own_loan_returned(self, people):
         set_loan(people["rope"], "on_loan", people["olive"], people["inventory"])
 
-        with pytest.raises(PermissionDenied):
-            self.mark_returned(people["olive"], people, people["olive"])
-        assert loan_of(people["rope"])[0] == "on_loan"
+        self.mark_returned(people["olive"], people, people["olive"])
+
+        assert loan_of(people["rope"]) == available()
 
     def test_a_pending_request_cannot_be_marked_returned(self, people):
         request(people["mia"], people["inventory"], people["rope"])
@@ -396,3 +409,24 @@ class TestCommittedRaces:
         assert outcomes["first"] == "ok"
         assert isinstance(outcomes["second"], Conflict)
         assert loan_of(people["rope"])[0] == "on_loan"
+
+
+@pytest.mark.django_db
+class TestUse:
+    def test_the_owner_takes_their_item_on_loan_with_no_loan_inventory(self, people):
+        loans.use(people["adam"], people["rope"].id)
+
+        assert loan_of(people["rope"]) == ("on_loan", people["adam"].id, None)
+
+    @pytest.mark.parametrize("who", ["olive", "mia"])
+    def test_anyone_else_is_not_found(self, people, who):
+        with pytest.raises(NotFound):
+            loans.use(people[who], people["rope"].id)
+        assert loan_of(people["rope"]) == available()
+
+    def test_an_item_that_is_not_available_conflicts(self, people):
+        request(people["mia"], people["inventory"], people["rope"])
+
+        with pytest.raises(Conflict):
+            loans.use(people["adam"], people["rope"].id)
+        assert loan_of(people["rope"])[:2] == ("requested", people["mia"].id)

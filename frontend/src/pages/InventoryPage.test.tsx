@@ -947,35 +947,92 @@ describe("borrowing", () => {
       );
     });
 
-    it("offers no Approve, Decline or Mark returned on their own request or loan", async () => {
+    it("offers Mark available, not Approve, Decline or Mark returned, on their own", async () => {
       const mine = { borrower: ADA, borrowed_by_me: true };
       withListed("admin", () => [
         { ...STOVE, ...mine },
         { ...TENT, ...mine },
+        // Held through another inventory: no borrower is shown here.
+        { ...LAMP, borrowed_by_me: true },
       ]);
 
       await open();
 
       expect(within(itemFor("Tent")).getByText("Requested by you")).toBeVisible();
-      expect(within(itemFor("Stove")).getByText("On loan to you")).toBeVisible();
-      expect(buttonNames()).toEqual(["Cancel request for Tent"]);
+      expect(within(itemFor("Stove")).getByText("In use by you")).toBeVisible();
+      expect(within(itemFor("Lamp")).getByText("On loan to you")).toBeVisible();
+      expect(buttonNames()).toEqual(["Mark Stove available", "Cancel request for Tent"]);
     });
 
-    it("offers no Request on their own items", async () => {
-      withListed("admin", () => [ROPE], {
-        "GET /api/items/": json(200, [
-          {
-            id: ROPE.id,
-            name: ROPE.name,
-            description: "",
-            inventories: [{ id: 7, name: "Climbing Club" }],
-          },
-        ]),
+    it("marks someone else's item unavailable without a request, then available", async () => {
+      let rope = ROPE;
+      const backend = withListed("admin", () => [rope], {
+        [`POST ${URL}items/20/borrow/`]: () => {
+          rope = { ...ROPE, loan_status: "on_loan", borrowed_by_me: true, borrower: ADA };
+          return empty(204)({});
+        },
+        [`POST ${URL}items/20/return/`]: () => {
+          rope = ROPE;
+          return empty(204)({});
+        },
       });
-
       await open();
+      expect(buttonNames()).toEqual(["Mark Rope unavailable"]);
+      const button = screen.getByRole("button", { name: "Mark Rope unavailable" });
 
-      expect(screen.queryByRole("button", { name: "Request Rope" })).toBeNull();
+      fireEvent.click(button);
+
+      expect(await within(itemFor("Rope")).findByText("In use by you")).toBeVisible();
+      expect(buttonNames()).toEqual(["Mark Rope available"]);
+      expect(screen.getByRole("button", { name: "Mark Rope available" })).toBe(button);
+      expect(backend.requests(`POST ${URL}items/20/borrow/`)).toEqual([undefined]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Mark Rope available" }));
+
+      expect(await within(itemFor("Rope")).findByText("Available")).toBeVisible();
+      expect(backend.requests(`POST ${URL}items/20/return/`)).toEqual([{ borrower_id: ADA.id }]);
+    });
+
+    describe("on their own items", () => {
+      const MY_ROPE = {
+        id: ROPE.id,
+        name: ROPE.name,
+        description: "",
+        inventories: [{ id: 7, name: "Climbing Club" }],
+        loan_status: "available",
+        borrower: null,
+        loan_inventory: null,
+      };
+
+      it("marks it unavailable as its owner, then available", async () => {
+        let rope: ListedItem = ROPE;
+        const backend = withListed("admin", () => [rope], {
+          "GET /api/items/": json(200, [MY_ROPE]),
+          "POST /api/items/20/use/": () => {
+            rope = { ...ROPE, loan_status: "on_loan", borrowed_by_me: true };
+            return empty(204)({});
+          },
+          "POST /api/items/20/return/": () => {
+            rope = ROPE;
+            return empty(204)({});
+          },
+        });
+        await open();
+        expect(buttonNames()).toEqual(["Mark Rope unavailable", "Remove Rope from the inventory"]);
+
+        fireEvent.click(screen.getByRole("button", { name: "Mark Rope unavailable" }));
+
+        expect(await within(itemFor("Rope")).findByText("In use by you")).toBeVisible();
+        expect(backend.requests("POST /api/items/20/use/")).toEqual([undefined]);
+
+        fireEvent.click(screen.getByRole("button", { name: "Mark Rope available" }));
+
+        expect(await within(itemFor("Rope")).findByText("Available")).toBeVisible();
+        expect(backend.requests("POST /api/items/20/return/")).toEqual([
+          { borrower_id: ADA.id },
+        ]);
+        expect(backend.requests(`POST ${URL}items/20/borrow/`)).toHaveLength(0);
+      });
     });
   });
 });

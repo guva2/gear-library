@@ -44,6 +44,11 @@ def ref(inventory):
     return {"id": inventory.id, "name": inventory.name}
 
 
+def ref_as(inventory, role):
+    """An inventory in a Discover item, with the caller's role there."""
+    return {**ref(inventory), "role": role}
+
+
 def query_count(user, url):
     client = client_for(user)
     with CaptureQueriesContext(connection) as captured:
@@ -74,7 +79,10 @@ class TestDiscover:
                 "owner": name_of(people["adam"]),
                 "loan_status": "available",
                 "borrowed_by_me": False,
-                "inventories": [ref(people["camping"]), ref(people["climbing"])],
+                "inventories": [
+                    ref_as(people["camping"], "admin"),
+                    ref_as(people["climbing"], "member"),
+                ],
             }
         ]
 
@@ -91,7 +99,7 @@ class TestDiscover:
 
         (seen,) = get(people["olive"], self.url)
 
-        assert seen["inventories"] == [ref(people["climbing"])]
+        assert seen["inventories"] == [ref_as(people["climbing"], "owner")]
 
     def test_an_invite_shows_nothing(self, people):
         list_in(people["climbing"], Item.objects.create(owner=people["adam"], name="Rope"))

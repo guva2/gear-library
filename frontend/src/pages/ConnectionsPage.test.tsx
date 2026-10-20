@@ -42,7 +42,7 @@ async function open() {
   await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
 }
 
-/** The page, without the sidebar and its health line. */
+/** The page, without the sidebar. */
 function inMain() {
   return within(screen.getByRole("main"));
 }

@@ -1,13 +1,13 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { DiscoverItem } from "../items";
+import type { BorrowedItem, DiscoverItem } from "../items";
 import { ADA, empty, fakeBackend, json } from "../test-backend";
 import { renderAt } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
 
-const CAMPING = { id: 8, name: "Camping Crew" };
-const CLIMBING = { id: 7, name: "Climbing Club" };
+const CAMPING = { id: 8, name: "Camping Crew", role: "member" } as const;
+const CLIMBING = { id: 7, name: "Climbing Club", role: "member" } as const;
 const BOB = { first_name: "Bob", last_name: "Stone" };
 
 const ROPE: DiscoverItem = {
@@ -35,12 +35,18 @@ const TENT: DiscoverItem = {
 };
 const STOVE: DiscoverItem = { ...AXE, id: 23, name: "Stove", loan_status: "on_loan" };
 
-/** A backend whose item list changes as the page acts, so a reload shows the new state. */
-function liveBackend(routes: (state: { items: DiscoverItem[] }) => Routes = () => ({})) {
-  const state = { items: [AXE, ROPE, TENT, STOVE] };
+interface State {
+  items: DiscoverItem[];
+  borrowed: BorrowedItem[];
+}
+
+/** A backend whose item lists change as the page acts, so a reload shows the new state. */
+function liveBackend(routes: (state: State) => Routes = () => ({})) {
+  const state: State = { items: [AXE, ROPE, TENT, STOVE], borrowed: [] };
   return fakeBackend({
     "GET /api/auth/me/": json(200, ADA),
     "GET /api/discover/": () => json(200, state.items)({}),
+    "GET /api/borrowing/": () => json(200, state.borrowed)({}),
     ...routes(state),
   });
 }
@@ -207,5 +213,130 @@ describe("discover", () => {
     renderAt("/");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the items.");
+  });
+});
+
+describe("discover as an admin or owner", () => {
+  const ADMIN_OF_CLIMBING = { ...CLIMBING, role: "admin" } as const;
+  const OWNER_OF_CAMPING = { ...CAMPING, role: "owner" } as const;
+  /** Held by Ada through Climbing Club, where she is an admin. */
+  const HELD: BorrowedItem = {
+    id: 21,
+    name: "Axe",
+    description: "",
+    loan_status: "on_loan",
+    owner: BOB,
+    loan_inventory: CLIMBING,
+    can_return: true,
+  };
+
+  it("marks an item unavailable through the inventory that makes the caller an admin", async () => {
+    const backend = liveBackend((state) => {
+      state.items = [{ ...ROPE, inventories: [CAMPING, ADMIN_OF_CLIMBING] }];
+      return {
+        "POST /api/inventories/7/items/20/borrow/": () => {
+          state.items = [{ ...state.items[0], loan_status: "on_loan", borrowed_by_me: true }];
+          state.borrowed = [{ ...HELD, id: 20, name: "Rope" }];
+          return empty(204)({});
+        },
+      };
+    });
+    await open();
+    expect(within(card("Rope")).queryByRole("button", { name: "Request Rope" })).toBeNull();
+
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
+
+    expect(await within(card("Rope")).findByText("In use by you")).toBeInTheDocument();
+    expect(within(card("Rope")).queryByLabelText("Request through")).toBeNull();
+    expect(backend.requests("POST /api/inventories/7/items/20/borrow/")).toEqual([undefined]);
+  });
+
+  it("uses the first of several inventories where the caller is an admin or owner", async () => {
+    const backend = liveBackend((state) => {
+      state.items = [{ ...ROPE, inventories: [OWNER_OF_CAMPING, ADMIN_OF_CLIMBING] }];
+      return { "POST /api/inventories/8/items/20/borrow/": empty(204) };
+    });
+    await open();
+
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
+
+    await waitFor(() =>
+      expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(1),
+    );
+  });
+
+  it("marks an item it holds available through its loan inventory", async () => {
+    const backend = liveBackend((state) => {
+      state.items = [
+        { ...AXE, inventories: [ADMIN_OF_CLIMBING], loan_status: "on_loan", borrowed_by_me: true },
+      ];
+      state.borrowed = [HELD];
+      return {
+        "POST /api/inventories/7/items/21/return/": () => {
+          state.items = [{ ...AXE, inventories: [ADMIN_OF_CLIMBING] }];
+          state.borrowed = [];
+          return empty(204)({});
+        },
+      };
+    });
+    await open();
+    expect(card("Axe")).toHaveClass("unavailable");
+
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Mark Axe available" }));
+
+    expect(
+      await within(card("Axe")).findByRole("button", { name: "Mark Axe unavailable" }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(card("Axe")).getByRole("heading", { name: "Axe" })).toHaveFocus(),
+    );
+    expect(backend.requests("POST /api/inventories/7/items/21/return/")).toEqual([
+      { borrower_id: ADA.id },
+    ]);
+  });
+
+  it("focuses only the card acted on when another card changes in the same reload", async () => {
+    liveBackend((state) => {
+      state.items = [
+        { ...AXE, inventories: [ADMIN_OF_CLIMBING], loan_status: "on_loan", borrowed_by_me: true },
+        STOVE,
+      ];
+      state.borrowed = [HELD];
+      return {
+        "POST /api/inventories/7/items/21/return/": () => {
+          state.items = [
+            { ...AXE, inventories: [ADMIN_OF_CLIMBING] },
+            { ...STOVE, loan_status: "available" },
+          ];
+          state.borrowed = [];
+          return empty(204)({});
+        },
+      };
+    });
+    await open();
+
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Mark Axe available" }));
+
+    expect(
+      await within(card("Stove")).findByRole("button", { name: "Request Stove" }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(card("Axe")).getByRole("heading", { name: "Axe" })).toHaveFocus(),
+    );
+  });
+
+  it("offers nothing on a loan the caller may not mark available", async () => {
+    liveBackend((state) => {
+      state.items = [
+        { ...AXE, inventories: [ADMIN_OF_CLIMBING], loan_status: "on_loan", borrowed_by_me: true },
+      ];
+      state.borrowed = [{ ...HELD, can_return: false }];
+      return {};
+    });
+
+    await open();
+
+    expect(within(card("Axe")).getByText("On loan to you")).toBeInTheDocument();
+    expect(within(card("Axe")).queryByRole("button")).toBeNull();
   });
 });

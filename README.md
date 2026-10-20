@@ -4,14 +4,16 @@ Share gear through inventories. You own your items. An inventory is a group of p
 share gear: only its members see it and the items listed in it. You can create or join any
 number of inventories, and you have one role in each:
 
-- `member`: sees and borrows the inventory's items, and sees who its admins and owners are.
+- `member`: sees the inventory's items and requests to borrow them, and sees who its admins
+  and owners are.
 - `admin`: also sees every member, invites their connections and revokes invites, lists
-  and removes their own items, approves and declines borrow requests made through the
-  inventory, and marks those items returned.
+  and removes their own items, uses the inventory's items without asking, approves and
+  declines borrow requests made through the inventory, and marks those items returned.
 - `owner`: also sets members' roles, removes members, and renames or deletes the
   inventory.
 
-The full rights of each role are in [`docs/schema.md`](docs/schema.md).
+You can also mark your own items unavailable while you use them. The full rights of each
+role are in [`docs/schema.md`](docs/schema.md).
 
 You connect with other users by phone number: send a request, and they accept or decline
 it. Connected users see each other's name and phone number.
@@ -28,9 +30,15 @@ docker compose up --build
 ```
 
 Open <http://localhost:5173>, then create an account or log in as a demo user (see
-[Demo data](#demo-data)). After you log in, the sidebar footer shows whether the backend
-and database are up. It checks once, when the page loads. On a first start the backend
-may still be migrating, so reload the page to check again.
+[Demo data](#demo-data)). To check that the backend and database are up:
+
+```sh
+curl http://localhost:5173/api/health/
+```
+
+It answers `{"status": "ok", "database": "ok"}`, or `503` when the database is
+unavailable. On a first start the backend may still be migrating, so try again after a
+few seconds.
 
 `docker compose up` starts three services:
 

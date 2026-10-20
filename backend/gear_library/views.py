@@ -6,7 +6,18 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import DatabaseError, IntegrityError, connection, transaction
-from django.db.models import Case, Exists, OuterRef, Prefetch, Q, Value, When
+from django.db.models import (
+    BooleanField,
+    Case,
+    Exists,
+    ExpressionWrapper,
+    OuterRef,
+    Prefetch,
+    Q,
+    Subquery,
+    Value,
+    When,
+)
 from django.middleware.csrf import get_token
 from rest_framework import serializers, status
 from rest_framework.decorators import (
@@ -352,7 +363,7 @@ class ListingViewSet(InventoryScopedViewSet):
 
     @action(detail=True, methods=["post"])
     def borrow(self, request, **kwargs):
-        loans.request_item(request.user, self.get_object())
+        loans.borrow(request.membership, self.get_object())
         return _no_content()
 
     def _change_loan(self, change):
@@ -527,13 +538,26 @@ class ItemViewSet(ApiViewSet):
         loans.owner_mark_returned(request.user, self.kwargs["id"], borrower_id)
         return _no_content()
 
+    @action(detail=True, methods=["post"])
+    def use(self, request, **kwargs):
+        loans.use(request.user, self.kwargs["id"])
+        return _no_content()
+
 
 class BorrowingViewSet(ApiViewSet):
     """The caller's pending requests and the items they hold."""
 
     def list(self, request):
+        user = request.user
+        admin_of = _inventory_ids(user, [Role.ADMIN, Role.OWNER])
+        # The holder marks it returned through `/api/items/{id}/return/` as its owner, or
+        # through its loan inventory's `return/` as an admin or owner there.
+        can_return = Q(loan_status=LoanStatus.ON_LOAN) & (
+            Q(owner=user) | Q(loan_inventory_id__in=admin_of) & Exists(_listed_where_lent())
+        )
         borrowed = (
-            Item.objects.filter(borrower=request.user)
+            Item.objects.filter(borrower=user)
+            .annotate(can_return=ExpressionWrapper(can_return, output_field=BooleanField()))
             .select_related("owner", "loan_inventory")
             .order_by("name", "id")
         )
@@ -554,14 +578,22 @@ def _inventory_ids(user, roles=None):
     return memberships.values("inventory_id")
 
 
-def _visible_listings(user):
+def _listed_where_lent():
+    """A subquery for an outer item: its listing in its loan inventory."""
+    return InventoryItem.objects.filter(item=OuterRef("pk"), inventory=OuterRef("loan_inventory"))
+
+
+def _visible_listings(user, with_role=False):
     """A prefetch of each item's listings in `user`'s inventories, as `visible_listings`,
-    sorted by inventory name."""
+    sorted by inventory name. `with_role` adds `user`'s role in each inventory as `role`."""
     listings = (
         InventoryItem.objects.filter(inventory_id__in=_inventory_ids(user))
         .select_related("inventory")
         .order_by("inventory__name", "inventory_id")
     )
+    if with_role:
+        own = Membership.objects.active().filter(user=user, inventory=OuterRef("inventory"))
+        listings = listings.annotate(role=Subquery(own.values("role")))
     return Prefetch("listings", queryset=listings, to_attr="visible_listings")
 
 
@@ -575,7 +607,7 @@ class DiscoverViewSet(ApiViewSet):
             Item.objects.filter(pk__in=listed.values("item_id"))
             .exclude(owner=user)
             .select_related("owner")
-            .prefetch_related(_visible_listings(user))
+            .prefetch_related(_visible_listings(user, with_role=True))
             .order_by(
                 Case(When(loan_status=LoanStatus.AVAILABLE, then=Value(0)), default=Value(1)),
                 "name",
@@ -596,13 +628,12 @@ class LendingViewSet(ApiViewSet):
         admin_of = set(
             _inventory_ids(user, [Role.ADMIN, Role.OWNER]).values_list("inventory_id", flat=True)
         )
-        listed_where_lent = InventoryItem.objects.filter(
-            item=OuterRef("pk"), inventory=OuterRef("loan_inventory")
-        )
         found = (
             Item.objects.filter(loan_status__in=[LoanStatus.REQUESTED, LoanStatus.ON_LOAN])
             .exclude(borrower=user)
-            .filter(Q(owner=user) | Q(loan_inventory_id__in=admin_of) & Exists(listed_where_lent))
+            .filter(
+                Q(owner=user) | Q(loan_inventory_id__in=admin_of) & Exists(_listed_where_lent())
+            )
             .select_related("owner", "borrower", "loan_inventory")
             .prefetch_related(_visible_listings(user))
             .order_by("name", "id")

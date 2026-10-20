@@ -38,6 +38,7 @@ const STOVE: BorrowedItem = {
   loan_status: "requested",
   owner: BOB,
   loan_inventory: { id: 8, name: "Camping Crew" },
+  can_return: false,
 };
 const TENT: BorrowedItem = {
   ...STOVE,
@@ -47,6 +48,22 @@ const TENT: BorrowedItem = {
   loan_status: "on_loan",
   loan_inventory: null,
 };
+/** Held by Ada as an admin of its loan inventory. */
+const BIVY: BorrowedItem = {
+  ...TENT,
+  id: 32,
+  name: "Bivy",
+  loan_inventory: CLIMBING,
+  can_return: true,
+};
+/** Ada's own item, which she uses. */
+const HEADLAMP: BorrowedItem = {
+  ...TENT,
+  id: 33,
+  name: "Headlamp",
+  owner: { first_name: ADA.first_name, last_name: ADA.last_name },
+  can_return: true,
+};
 
 interface State {
   lending: LendingItem[];
@@ -55,7 +72,10 @@ interface State {
 
 /** A backend whose lists change as the page acts, so a reload shows the new state. */
 function liveBackend(routes: (state: State) => Routes = () => ({})) {
-  const state: State = { lending: [ROPE, AXE, CORD, LAMP], borrowed: [STOVE, TENT] };
+  const state: State = {
+    lending: [ROPE, AXE, CORD, LAMP],
+    borrowed: [BIVY, HEADLAMP, STOVE, TENT],
+  };
   return fakeBackend({
     "GET /api/auth/me/": json(200, ADA),
     "GET /api/lending/": () => json(200, state.lending)({}),
@@ -181,6 +201,36 @@ describe("my requests and borrowed", () => {
     expect(within(region("Borrowed")).queryByRole("button")).toBeNull();
   });
 
+  it("lists what the caller may mark available under Using, apart from Borrowed", async () => {
+    liveBackend();
+
+    await open();
+
+    expect(texts("Using")).toEqual([
+      "Bivy, owned by Bob Stone. In use by you, through Climbing Club.",
+      "Headlamp, yours. In use by you.",
+    ]);
+    expect(texts("Borrowed")).toEqual(["Tent, owned by Bob Stone. On loan to you."]);
+  });
+
+  it.each([
+    ["Bivy", "/api/inventories/7/items/32/return/"],
+    ["Headlamp", "/api/items/33/return/"],
+  ])("marks %s available through %s, then reloads", async (name, path) => {
+    const backend = liveBackend((state) => ({
+      [`POST ${path}`]: () => {
+        state.borrowed = state.borrowed.filter((item) => item.name !== name);
+        return empty(204)({});
+      },
+    }));
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: `Mark ${name} available` }));
+
+    await waitFor(() => expect(texts("Using")).toHaveLength(1));
+    expect(backend.requests(`POST ${path}`)).toEqual([{ borrower_id: ADA.id }]);
+  });
+
   it("cancels a pending request and reloads", async () => {
     const backend = liveBackend((state) => ({
       "POST /api/borrowing/30/cancel/": () => {
@@ -229,12 +279,14 @@ describe("loans page", () => {
         "Waiting for your approval",
         "Lent out",
         "My requests",
+        "Using",
         "Borrowed",
       ].map((name) => within(region(name)).getByRole("paragraph").textContent),
     ).toEqual([
       "Nothing is waiting.",
       "Nothing is lent out.",
       "You have no pending requests.",
+      "You are not using anything.",
       "You are not borrowing anything.",
     ]);
   });

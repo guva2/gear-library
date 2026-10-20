@@ -1,3 +1,4 @@
+import { useAuth } from "../auth";
 import { FormErrors, useChange } from "../forms";
 import { fullName, getJson } from "../inventories";
 import { borrowerText, describeItem, type BorrowedItem, type LendingItem } from "../items";
@@ -23,6 +24,21 @@ function lendingText(item: LendingItem): string {
   return `${describeItem(item)}, ${owner}. ${state}${through}.`;
 }
 
+/**
+ * The return path for an item the signed-in user holds and may mark returned. The owner's
+ * own use has no loan inventory; any other is returned through its loan inventory.
+ */
+function holderReturnPath(item: BorrowedItem): string {
+  if (item.loan_inventory === null) return `/api/items/${item.id}/return/`;
+  return `/api/inventories/${item.loan_inventory.id}/items/${item.id}/return/`;
+}
+
+function usingText(item: BorrowedItem): string {
+  if (item.loan_inventory === null) return `${describeItem(item)}, yours. In use by you.`;
+  const owned = `${describeItem(item)}, owned by ${fullName(item.owner)}.`;
+  return `${owned} In use by you, through ${item.loan_inventory.name}.`;
+}
+
 function borrowedText(item: BorrowedItem): string {
   const owned = `${describeItem(item)}, owned by ${fullName(item.owner)}.`;
   const through = item.loan_inventory ? ` through ${item.loan_inventory.name}` : "";
@@ -37,6 +53,7 @@ interface Action {
 }
 
 export default function LoansPage() {
+  const { user } = useAuth();
   const [page, reload] = useLoad(loadPage);
   const { errors, change } = useChange(reload);
 
@@ -78,6 +95,18 @@ export default function LoansPage() {
         label: "Mark returned",
         name: `Mark ${item.name} returned`,
         run: () => change(path, "POST", body),
+      },
+    ];
+  }
+
+  function markingAvailable(item: BorrowedItem): Action[] {
+    if (!user) return [];
+    const body = { borrower_id: user.id };
+    return [
+      {
+        label: "Mark available",
+        name: `Mark ${item.name} available`,
+        run: () => change(holderReturnPath(item), "POST", body),
       },
     ];
   }
@@ -125,10 +154,22 @@ export default function LoansPage() {
             actions={cancelling}
           />
           <LoanSection
+            id="using"
+            title="Using"
+            empty="You are not using anything."
+            items={page.data.borrowed.filter(
+              (item) => item.loan_status === "on_loan" && item.can_return,
+            )}
+            describe={usingText}
+            actions={markingAvailable}
+          />
+          <LoanSection
             id="borrowed"
             title="Borrowed"
             empty="You are not borrowing anything."
-            items={page.data.borrowed.filter((item) => item.loan_status === "on_loan")}
+            items={page.data.borrowed.filter(
+              (item) => item.loan_status === "on_loan" && !item.can_return,
+            )}
             describe={borrowedText}
             actions={() => []}
           />

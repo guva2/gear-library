@@ -12,7 +12,7 @@ from django.db import connection, connections
 from gear_library import inventories
 from gear_library.models import Inventory, InventoryItem, Item, Membership
 
-from .test_inventory_service import connect, wait_for_a_blocked_lock
+from .test_inventory_service import connect, run_in_thread, wait_for_a_blocked_lock
 from .test_items_api import client_for, list_in, make_inventory, make_user
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -286,3 +286,38 @@ def test_an_item_delete_request_starts_again_after_a_listing_it_had_not_locked()
         if sql.startswith(SELECT_INVENTORY) and sql.endswith(FOR_UPDATE)
     ]
     assert any(camping.id in params for params in inventory_locks)
+
+
+
+def test_a_use_waits_for_the_item_delete_and_is_not_found():
+    """The owner's use takes only the item row's lock, so it waits on a delete that holds
+    it, then finds the item gone."""
+    owner = make_user(1)
+    climbing = make_inventory("Climbing", [(owner, "owner")])
+    rope = Item.objects.create(owner=owner, name="Rope")
+    list_in(climbing, rope)
+    held, release = threading.Event(), threading.Event()
+    outcomes, responses = {}, {}
+
+    def delete_when_released():
+        Item.objects.select_for_update().get(pk=rope.pk)
+        held.set()
+        assert release.wait(10)
+        Item.objects.filter(pk=rope.pk).delete()
+
+    deleter = run_in_thread("delete", delete_when_released, outcomes)
+    assert held.wait(10)
+    user = client_for(owner)
+    use = send_in_thread("use", lambda: user.post(f"/api/items/{rope.id}/use/"), responses)
+    try:
+        wait_for_a_blocked_lock()
+    finally:
+        release.set()
+        deleter.join(10)
+        use.join(10)
+
+    assert outcomes["delete"] == "ok"
+    assert (responses["use"].status_code, responses["use"].json()) == (
+        404,
+        {"detail": "Item not found."},
+    )

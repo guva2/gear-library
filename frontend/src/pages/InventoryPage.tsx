@@ -181,6 +181,7 @@ function InventoryView({ base }: { base: string }) {
       )}
       <Items
         listed={listed}
+        staff={people.staff}
         listable={people.staff ? listable(myItems, listed) : null}
         removable={(item) => people.staff && (isOwner || myItemIds.has(item.id))}
         owned={(item) => myItemIds.has(item.id)}
@@ -381,33 +382,72 @@ function listable(myItems: Item[], listed: ListedItem[]): Item[] {
   return myItems.filter((item) => !listedIds.has(item.id));
 }
 
+interface Holding {
+  item: ListedItem;
+  /** True for the caller's own items. */
+  owned: boolean;
+  /** True when the caller is an admin or owner here. */
+  staff: boolean;
+  base: string;
+}
+
+/**
+ * Where the caller marks an item they hold returned: as its owner, or as an admin or owner
+ * here when the item's `borrower` is present. `null` when they do not hold it or may not
+ * mark it returned.
+ */
+function holderReturnPath({ item, owned, staff, base }: Holding): string | null {
+  if (item.loan_status !== "on_loan" || !item.borrowed_by_me) return null;
+  if (owned) return `/api/items/${item.id}/return/`;
+  if (staff && item.borrower) return `${base}items/${item.id}/return/`;
+  return null;
+}
+
 /** The loan status, with who has requested or borrowed the item when the caller may see it. */
-function loanText(item: ListedItem): string {
+function loanText(holding: Holding): string {
+  const { item } = holding;
+  if (holderReturnPath(holding)) return "In use by you";
   const borrower = item.borrowed_by_me ? "you" : item.borrower;
   if (!borrower) return LOAN_STATUS_LABELS[item.loan_status];
   return borrowerText(item.loan_status, borrower);
 }
 
-interface LoanButtonsProps {
-  item: ListedItem;
-  owned: boolean;
-  base: string;
+interface LoanButtonsProps extends Holding {
+  userId: number | undefined;
   onLoanChange: (path: string, body?: unknown) => void;
 }
 
 /**
  * The loan changes the caller may make. Approve, decline and mark returned send the
- * borrower the page showed.
+ * borrower the page showed. Mark unavailable and Mark available share a key, so the button
+ * keeps focus when the item changes between them.
  */
-function LoanButtons({ item, owned, base, onLoanChange }: LoanButtonsProps) {
+function LoanButtons({ userId, onLoanChange, ...holding }: LoanButtonsProps) {
+  const { item, owned, staff, base } = holding;
   const path = `${base}items/${item.id}/`;
-  const buttons: { label: string; name: string; onClick: () => void }[] = [];
+  const buttons: { key?: string; label: string; name: string; onClick: () => void }[] = [];
   const asStaff = item.borrower && !item.borrowed_by_me ? { borrower_id: item.borrower.id } : null;
-  if (item.loan_status === "available" && !owned) {
+  const returnPath = holderReturnPath(holding);
+  if (item.loan_status === "available" && (owned || staff)) {
+    buttons.push({
+      key: "availability",
+      label: "Mark unavailable",
+      name: `Mark ${item.name} unavailable`,
+      onClick: () => onLoanChange(owned ? `/api/items/${item.id}/use/` : `${path}borrow/`),
+    });
+  } else if (item.loan_status === "available") {
     buttons.push({
       label: "Request",
       name: `Request ${item.name}`,
       onClick: () => onLoanChange(`${path}borrow/`),
+    });
+  }
+  if (returnPath && userId !== undefined) {
+    buttons.push({
+      key: "availability",
+      label: "Mark available",
+      name: `Mark ${item.name} available`,
+      onClick: () => onLoanChange(returnPath, { borrower_id: userId }),
     });
   }
   if (item.loan_status === "requested" && item.borrowed_by_me) {
@@ -439,7 +479,7 @@ function LoanButtons({ item, owned, base, onLoanChange }: LoanButtonsProps) {
     });
   }
   return buttons.map((button) => (
-    <span key={button.name}>
+    <span key={button.key ?? button.name}>
       {" "}
       <button type="button" aria-label={button.name} onClick={button.onClick}>
         {button.label}
@@ -450,6 +490,8 @@ function LoanButtons({ item, owned, base, onLoanChange }: LoanButtonsProps) {
 
 interface ItemsProps {
   listed: ListedItem[];
+  /** True when the caller is an admin or owner here. */
+  staff: boolean;
   /** The items the caller may list here, or `null` for a `member`, who lists nothing. */
   listable: Item[] | null;
   removable: (item: ListedItem) => boolean;
@@ -465,6 +507,7 @@ interface ItemsProps {
 
 function Items({
   listed,
+  staff,
   listable,
   removable,
   owned,
@@ -475,6 +518,7 @@ function Items({
   onRemove,
   onLoanChange,
 }: ItemsProps) {
+  const { user } = useAuth();
   return (
     <section aria-labelledby="items">
       <h3 id="items">Items</h3>
@@ -485,11 +529,13 @@ function Items({
           {listed.map((item) => (
             <li key={item.id}>
               <span>{`${describeItem(item)}, owned by ${fullName(item.owner)}`}</span>{" "}
-              <span>{loanText(item)}</span>
+              <span>{loanText({ item, owned: owned(item), staff, base })}</span>
               <LoanButtons
                 item={item}
                 owned={owned(item)}
+                staff={staff}
                 base={base}
+                userId={user?.id}
                 onLoanChange={onLoanChange}
               />
               {removable(item) && (
