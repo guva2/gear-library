@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ADA, empty, fakeBackend, json } from "../test-backend";
+import type { ListedItem } from "../items";
 import { fillIn, renderAt } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
@@ -530,19 +531,26 @@ describe("as an owner", () => {
 });
 
 describe("items", () => {
-  const ROPE = {
+  const ROPE: ListedItem = {
     id: 20,
     name: "Rope",
     description: "60 m dynamic",
     owner: { first_name: "Ada", last_name: "Lovelace" },
   };
-  const TENT = {
+  const TENT: ListedItem = {
     id: 21,
     name: "Tent",
     description: "",
     owner: { first_name: "Bob", last_name: "Stone" },
   };
   const HELMET = { id: 23, name: "Helmet", description: "", inventories: [] };
+  // What listing the helmet returns.
+  const LISTED_HELMET: ListedItem = {
+    id: HELMET.id,
+    name: HELMET.name,
+    description: HELMET.description,
+    owner: ROPE.owner,
+  };
   // The caller's own items: the rope is listed here, the axe and the helmet are not.
   const MY_ITEMS = [
     { id: 22, name: "Axe", description: "", inventories: [] },
@@ -633,14 +641,26 @@ describe("items", () => {
     expect(pickerOptions()).toEqual(["Axe", "Helmet"]);
   });
 
+  it("tells apart two of the caller's items with the same name by their descriptions", async () => {
+    withItems("admin", {
+      "GET /api/items/": json(200, [
+        { id: 30, name: "Stove", description: "gas", inventories: [] },
+        { id: 31, name: "Stove", description: "", inventories: [] },
+      ]),
+    });
+
+    await open();
+
+    expect(pickerOptions()).toEqual(["Stove: gas", "Stove"]);
+  });
+
   it("lists the chosen item and reloads the items and the picker", async () => {
     let listed = [ROPE, TENT];
     const backend = withItems("admin", {
       [`GET ${URL}items/`]: () => json(200, listed)({}),
       [`POST ${URL}items/`]: () => {
-        const helmet = { ...HELMET, owner: ROPE.owner };
-        listed = [helmet, ROPE, TENT];
-        return json(201, helmet)({});
+        listed = [LISTED_HELMET, ROPE, TENT];
+        return json(201, LISTED_HELMET)({});
       },
     });
     await open();
@@ -671,7 +691,7 @@ describe("items", () => {
   it("clears an invite refusal when another action on the page succeeds", async () => {
     withItems("admin", {
       [`POST ${URL}invites/`]: json(400, { user_id: ["You can invite only your connections."] }),
-      [`POST ${URL}items/`]: json(201, { ...HELMET, owner: ROPE.owner }),
+      [`POST ${URL}items/`]: json(201, LISTED_HELMET),
     });
     await open();
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
@@ -702,7 +722,7 @@ describe("items", () => {
       "GET /api/items/": json(200, [HELMET, MY_ITEMS[2]]),
       [`GET ${URL}items/`]: () => json(200, listed)({}),
       [`POST ${URL}items/`]: () => {
-        listed = [{ ...HELMET, owner: ROPE.owner }, ROPE, TENT];
+        listed = [LISTED_HELMET, ROPE, TENT];
         return json(201, listed[0])({});
       },
     });

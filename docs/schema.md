@@ -185,8 +185,8 @@ These rules span tables, so the database cannot check them alone.
   row in the other status gets `409`, except that accepting a row that is already
   accepted returns it.
 - Listing an item locks the inventory's row (`select_for_update`), then the item's row.
-  Unlisting locks only the inventory's row. Borrow requests, approvals, declines, cancels and mark returned through an inventory
-  lock its row first.
+  Unlisting locks only the inventory's row. Borrow requests, approvals, declines, cancels
+  and mark returned through an inventory lock its row first.
 - After locking, the operation re-reads and re-checks the rows it depends on, including the
   acting user's own membership and role.
 - Approve, decline, cancel and mark returned are each one conditional update on the item.

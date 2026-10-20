@@ -1,16 +1,10 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import type { Item } from "../items";
 import { ADA, empty, fakeBackend, json } from "../test-backend";
 import { renderAt } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
-
-interface Item {
-  id: number;
-  name: string;
-  description: string;
-  inventories: { id: number; name: string }[];
-}
 
 const ROPE: Item = {
   id: 20,

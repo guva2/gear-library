@@ -105,13 +105,13 @@ class TestItems:
 
 
 @pytest.mark.django_db
-class TestListing:
+class TestAddListing:
     @pytest.mark.parametrize("role", ["admin", "owner"])
     def test_admins_and_owners_list_their_own_items(self, inventory, role):
         user = join(inventory, role, 2)
         item = items.create_item(user, {"name": "Rope"})
 
-        listing = items.list_item(as_(user, inventory), item.id)
+        listing = items.add_listing(as_(user, inventory), item.id)
 
         assert (listing.inventory_id, listing.item) == (inventory.id, item)
         assert listed(inventory) == {item.id}
@@ -125,24 +125,24 @@ class TestListing:
         item_id = 999999 if who == "missing" else item.id
 
         with pytest.raises(ValidationError) as excinfo:
-            items.list_item(as_(owner, inventory), item_id)
+            items.add_listing(as_(owner, inventory), item_id)
         assert excinfo.value.detail == NOT_YOURS
         assert not InventoryItem.objects.exists()
 
     def test_listing_an_item_twice_conflicts(self, inventory, owner):
         item = items.create_item(owner, {"name": "Rope"})
-        items.list_item(as_(owner, inventory), item.id)
+        items.add_listing(as_(owner, inventory), item.id)
 
         with pytest.raises(Conflict):
-            items.list_item(as_(owner, inventory), item.id)
+            items.add_listing(as_(owner, inventory), item.id)
         assert InventoryItem.objects.count() == 1
 
     def test_an_item_is_listed_in_several_inventories(self, inventory, owner):
         other = inventories.create_inventory(owner, "Camping").inventory
         item = items.create_item(owner, {"name": "Rope"})
 
-        items.list_item(as_(owner, inventory), item.id)
-        items.list_item(as_(owner, other), item.id)
+        items.add_listing(as_(owner, inventory), item.id)
+        items.add_listing(as_(owner, other), item.id)
 
         assert item.listings.count() == 2
 
@@ -153,7 +153,7 @@ class TestListing:
         Membership.objects.filter(user=admin).update(role="member")
 
         with pytest.raises(PermissionDenied):
-            items.list_item(actor, item.id)
+            items.add_listing(actor, item.id)
         assert not InventoryItem.objects.exists()
 
     def test_an_actor_who_left_since_the_check_is_not_found(self, inventory):
@@ -163,7 +163,7 @@ class TestListing:
         Membership.objects.filter(user=admin).delete()
 
         with pytest.raises(NotFound):
-            items.list_item(actor, item.id)
+            items.add_listing(actor, item.id)
 
     def test_an_inventory_deleted_since_the_check_is_not_found(self, inventory, owner):
         item = items.create_item(owner, {"name": "Rope"})
@@ -171,17 +171,17 @@ class TestListing:
         Inventory.objects.filter(pk=inventory.pk).delete()
 
         with pytest.raises(NotFound):
-            items.list_item(actor, item.id)
+            items.add_listing(actor, item.id)
 
 
 @pytest.mark.django_db
-class TestUnlisting:
+class TestRemoveListing:
     @pytest.fixture
     def admin(self, inventory):
         return join(inventory, "admin", 2)
 
-    def unlist(self, user, inventory, item):
-        items.unlist_item(user, inventory.id, item.id)
+    def remove_listing(self, user, inventory, item):
+        items.remove_listing(user, inventory.id, item.id)
 
     @pytest.mark.parametrize("role", ["admin", "owner"])
     def test_admins_and_owners_remove_their_own_items(self, inventory, role):
@@ -189,7 +189,7 @@ class TestUnlisting:
         item = items.create_item(user, {"name": "Rope"})
         list_directly(inventory, item)
 
-        self.unlist(user, inventory, item)
+        self.remove_listing(user, inventory, item)
 
         assert listed(inventory) == set()
         assert Item.objects.filter(pk=item.pk).exists()
@@ -198,7 +198,7 @@ class TestUnlisting:
         item = items.create_item(admin, {"name": "Rope"})
         list_directly(inventory, item)
 
-        self.unlist(owner, inventory, item)
+        self.remove_listing(owner, inventory, item)
 
         assert listed(inventory) == set()
 
@@ -207,7 +207,7 @@ class TestUnlisting:
         list_directly(inventory, item)
 
         with pytest.raises(PermissionDenied):
-            self.unlist(admin, inventory, item)
+            self.remove_listing(admin, inventory, item)
         assert listed(inventory) == {item.id}
 
     def test_a_member_cannot_remove_anything(self, inventory, owner):
@@ -216,7 +216,7 @@ class TestUnlisting:
         list_directly(inventory, item)
 
         with pytest.raises(PermissionDenied):
-            self.unlist(member, inventory, item)
+            self.remove_listing(member, inventory, item)
         assert listed(inventory) == {item.id}
 
     def test_a_non_member_is_not_found(self, inventory, owner):
@@ -224,7 +224,7 @@ class TestUnlisting:
         list_directly(inventory, item)
 
         with pytest.raises(NotFound):
-            self.unlist(make_user(9), inventory, item)
+            self.remove_listing(make_user(9), inventory, item)
         assert listed(inventory) == {item.id}
 
     def test_an_item_that_is_not_listed_is_not_found(self, inventory, owner):
@@ -233,7 +233,7 @@ class TestUnlisting:
         list_directly(elsewhere, item)
 
         with pytest.raises(NotFound):
-            self.unlist(owner, inventory, item)
+            self.remove_listing(owner, inventory, item)
         assert listed(elsewhere) == {item.id}
 
     def test_a_listing_deleted_after_it_was_read_is_not_found(
@@ -251,7 +251,7 @@ class TestUnlisting:
         monkeypatch.setattr(items, "_listing", delete_after_reading)
 
         with pytest.raises(NotFound):
-            self.unlist(owner, inventory, item)
+            self.remove_listing(owner, inventory, item)
 
 
 @pytest.mark.django_db
@@ -351,7 +351,7 @@ class TestCommittedRaces:
             with connection.execute_wrapper(hold_after(SELECT_ITEM, held, release)):
                 items.delete_item(owner, item.id)
 
-        outcomes = self.race(delete, lambda: items.list_item(actor, item.id), held, release)
+        outcomes = self.race(delete, lambda: items.add_listing(actor, item.id), held, release)
 
         assert outcomes["first"] == "ok"
         assert isinstance(outcomes["second"], ValidationError)
@@ -365,7 +365,7 @@ class TestCommittedRaces:
 
         def list_it():
             with connection.execute_wrapper(hold_after(INSERT_LISTING, held, release)):
-                items.list_item(actor, item.id)
+                items.add_listing(actor, item.id)
 
         outcomes = self.race(list_it, lambda: items.delete_item(owner, item.id), held, release)
 
@@ -390,7 +390,7 @@ class TestCommittedRaces:
                 held.set()
                 assert release.wait(10)
 
-        outcomes = self.race(demote, lambda: items.list_item(lister, theirs.id), held, release)
+        outcomes = self.race(demote, lambda: items.add_listing(lister, theirs.id), held, release)
 
         assert outcomes["first"] == "ok"
         assert isinstance(outcomes["second"], PermissionDenied)

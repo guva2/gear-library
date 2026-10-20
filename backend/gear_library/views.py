@@ -355,7 +355,7 @@ def inventory_items(request, inventory_id):
     if request.method == "POST":
         actor = inventories.get_membership(request.user, inventory_id, Role.ADMIN)
         item_id = _validated(ItemIdSerializer, request)["item_id"]
-        listing = items.list_item(actor, item_id)
+        listing = items.add_listing(actor, item_id)
         return Response(ListedItemSerializer(listing).data, status=status.HTTP_201_CREATED)
     inventories.get_membership(request.user, inventory_id)
     listings = (
@@ -368,5 +368,5 @@ def inventory_items(request, inventory_id):
 
 @api_view(["DELETE"])
 def inventory_item_detail(request, inventory_id, item_id):
-    items.unlist_item(request.user, inventory_id, item_id)
+    items.remove_listing(request.user, inventory_id, item_id)
     return Response(status=status.HTTP_204_NO_CONTENT)

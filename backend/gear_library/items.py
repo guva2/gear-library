@@ -50,7 +50,7 @@ def delete_item(user, item_id):
 
 
 @transaction.atomic
-def list_item(actor, item_id):
+def add_listing(actor, item_id):
     """Lists the item `item_id` in the actor's inventory. `actor` must be an admin or
     owner, and is checked again with the inventory locked."""
     actor = lock_as(actor.user_id, actor.inventory_id, Role.ADMIN)
@@ -78,7 +78,7 @@ def _listing(inventory_id, item_id):
 
 
 @transaction.atomic
-def unlist_item(user, inventory_id, item_id):
+def remove_listing(user, inventory_id, item_id):
     """Removes the item `item_id` from the inventory. An owner removes any item, and an
     admin only their own."""
     actor = lock_as(user.id, inventory_id, Role.ADMIN)

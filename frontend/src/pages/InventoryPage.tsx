@@ -411,7 +411,11 @@ function Items({ listed, listable, removable, send, sent, base, reload, onRemove
       )}
       {listable && (
         <Picker
-          options={listable.map((item) => ({ id: item.id, name: item.name, label: item.name }))}
+          options={listable.map((item) => ({
+            id: item.id,
+            name: item.name,
+            label: describeItem(item),
+          }))}
           field="item_id"
           label="Item"
           action="List item"
