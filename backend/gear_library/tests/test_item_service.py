@@ -2,14 +2,14 @@ import threading
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import connection, transaction
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from django.db import connection
+from rest_framework.exceptions import NotFound, ValidationError
 
 from gear_library import inventories, items
 from gear_library.errors import Conflict
-from gear_library.models import Inventory, InventoryItem, Item, Membership
+from gear_library.models import InventoryItem, Item, Membership
 
-from .test_inventory_service import hold_after, run_in_thread, wait_for_a_blocked_lock
+from .test_inventory_service import as_, hold_after, run_in_thread, wait_for_a_blocked_lock
 
 User = get_user_model()
 
@@ -34,10 +34,6 @@ def join(inventory, role, n):
     user = make_user(n)
     Membership.objects.create(inventory=inventory, user=user, role=role, status="active")
     return user
-
-
-def as_(user, inventory, role="admin"):
-    return inventories.get_membership(user, inventory.id, role)
 
 
 def listed(inventory):
@@ -146,96 +142,20 @@ class TestAddListing:
 
         assert item.listings.count() == 2
 
-    def test_an_actor_demoted_since_the_check_is_forbidden(self, inventory):
-        admin = join(inventory, "admin", 2)
-        item = items.create_item(admin, {"name": "Rope"})
-        actor = as_(admin, inventory)
-        Membership.objects.filter(user=admin).update(role="member")
-
-        with pytest.raises(PermissionDenied):
-            items.add_listing(actor, item.id)
-        assert not InventoryItem.objects.exists()
-
-    def test_an_actor_who_left_since_the_check_is_not_found(self, inventory):
-        admin = join(inventory, "admin", 2)
-        item = items.create_item(admin, {"name": "Rope"})
-        actor = as_(admin, inventory)
-        Membership.objects.filter(user=admin).delete()
-
-        with pytest.raises(NotFound):
-            items.add_listing(actor, item.id)
-
-    def test_an_inventory_deleted_since_the_check_is_not_found(self, inventory, owner):
-        item = items.create_item(owner, {"name": "Rope"})
-        actor = as_(owner, inventory)
-        Inventory.objects.filter(pk=inventory.pk).delete()
-
-        with pytest.raises(NotFound):
-            items.add_listing(actor, item.id)
-
 
 @pytest.mark.django_db
 class TestRemoveListing:
-    @pytest.fixture
-    def admin(self, inventory):
-        return join(inventory, "admin", 2)
-
-    def remove_listing(self, user, inventory, item):
-        items.remove_listing(user, inventory.id, item.id)
-
-    @pytest.mark.parametrize("role", ["admin", "owner"])
-    def test_admins_and_owners_remove_their_own_items(self, inventory, role):
-        user = join(inventory, role, 3)
-        item = items.create_item(user, {"name": "Rope"})
-        list_directly(inventory, item)
-
-        self.remove_listing(user, inventory, item)
-
-        assert listed(inventory) == set()
-        assert Item.objects.filter(pk=item.pk).exists()
-
-    def test_an_owner_removes_anyones_item(self, inventory, owner, admin):
-        item = items.create_item(admin, {"name": "Rope"})
-        list_directly(inventory, item)
-
-        self.remove_listing(owner, inventory, item)
-
-        assert listed(inventory) == set()
-
-    def test_an_admin_cannot_remove_someone_elses_item(self, inventory, owner, admin):
-        item = items.create_item(owner, {"name": "Rope"})
-        list_directly(inventory, item)
-
-        with pytest.raises(PermissionDenied):
-            self.remove_listing(admin, inventory, item)
-        assert listed(inventory) == {item.id}
-
-    def test_a_member_cannot_remove_anything(self, inventory, owner):
-        member = join(inventory, "member", 3)
-        item = items.create_item(owner, {"name": "Rope"})
-        list_directly(inventory, item)
-
-        with pytest.raises(PermissionDenied):
-            self.remove_listing(member, inventory, item)
-        assert listed(inventory) == {item.id}
-
-    def test_a_non_member_is_not_found(self, inventory, owner):
-        item = items.create_item(owner, {"name": "Rope"})
-        list_directly(inventory, item)
-
-        with pytest.raises(NotFound):
-            self.remove_listing(make_user(9), inventory, item)
-        assert listed(inventory) == {item.id}
-
-    def test_an_item_that_is_not_listed_is_not_found(self, inventory, owner):
+    def test_removes_the_listing_and_keeps_the_item(self, inventory, owner):
         item = items.create_item(owner, {"name": "Rope"})
         elsewhere = inventories.create_inventory(owner, "Camping").inventory
+        listing = list_directly(inventory, item)
         list_directly(elsewhere, item)
 
-        with pytest.raises(NotFound):
-            self.remove_listing(owner, inventory, item)
-        assert listed(elsewhere) == {item.id}
+        items.remove_listing(listing)
 
+        assert listed(inventory) == set()
+        assert listed(elsewhere) == {item.id}
+        assert Item.objects.filter(pk=item.pk).exists()
 
 
 @pytest.mark.django_db
@@ -267,29 +187,29 @@ class TestMembershipChangesRemoveListings:
         assert Item.objects.count() == 2
 
     def test_leaving(self, inventory, admin, setup):
-        inventories.remove_member(admin, inventory.id, admin.id)
+        inventories.remove_member(as_(admin, inventory), admin.id)
 
         self.assert_only_their_listing_here_is_gone(inventory, setup)
 
     def test_being_removed(self, inventory, owner, admin, setup):
-        inventories.remove_member(owner, inventory.id, admin.id)
+        inventories.remove_member(as_(owner, inventory), admin.id)
 
         self.assert_only_their_listing_here_is_gone(inventory, setup)
 
     def test_taking_the_member_role(self, inventory, owner, admin, setup):
-        inventories.set_role(as_(owner, inventory, "owner"), admin.id, "member")
+        inventories.set_role(as_(owner, inventory), admin.id, "member")
 
         self.assert_only_their_listing_here_is_gone(inventory, setup)
 
     @pytest.mark.parametrize("role", ["admin", "owner"])
     def test_other_role_changes_keep_the_listings(self, inventory, owner, admin, setup, role):
-        inventories.set_role(as_(owner, inventory, "owner"), admin.id, role)
+        inventories.set_role(as_(owner, inventory), admin.id, role)
 
         assert listed(inventory) == {setup["ours"].id, setup["theirs"].id}
 
     def test_a_refused_change_keeps_the_listings(self, inventory, owner, setup):
         with pytest.raises(Conflict):
-            inventories.set_role(as_(owner, inventory, "owner"), owner.id, "member")
+            inventories.set_role(as_(owner, inventory), owner.id, "member")
 
         assert listed(inventory) == {setup["ours"].id, setup["theirs"].id}
 
@@ -397,26 +317,3 @@ class TestCommittedRaces:
             if sql.startswith(SELECT_INVENTORY) and sql.endswith(FOR_UPDATE)
         ]
         assert any(camping.id in params for params in inventory_locks)
-
-    def test_a_listing_waits_for_the_lister_taking_the_member_role_and_is_refused(
-        self, inventory, owner, item
-    ):
-        """Without the inventory lock, the listing could commit after the role change had
-        removed the lister's listings, and outlive the role it needs."""
-        admin = join(inventory, "admin", 2)
-        theirs = items.create_item(admin, {"name": "Tent"})
-        lister = as_(admin, inventory)
-        demoter = as_(owner, inventory, "owner")
-        held, release = threading.Event(), threading.Event()
-
-        def demote():
-            with transaction.atomic():
-                inventories.set_role(demoter, admin.id, "member")
-                held.set()
-                assert release.wait(10)
-
-        outcomes = self.race(demote, lambda: items.add_listing(lister, theirs.id), held, release)
-
-        assert outcomes["first"] == "ok"
-        assert isinstance(outcomes["second"], PermissionDenied)
-        assert not InventoryItem.objects.exists()

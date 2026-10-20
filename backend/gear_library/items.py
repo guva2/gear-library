@@ -3,10 +3,10 @@
 Only an item's owner creates, edits and deletes it. Editing is one conditional update on
 the item's id and owner. An item that is gone or not the caller's gets `NotFound`.
 
-Listing and removing a listing lock the inventory row through `inventories.lock_as`, which
-re-reads the caller's membership, so they run one at a time with every other change that
-takes that lock. Listing then locks the item row, and removing a listing cancels a pending
-request made through the inventory. Inventory rows are locked before item rows.
+Listing and removing a listing run with the inventory row locked by
+`inventories.lock_inventory`, taken before the caller's membership was read. Listing then
+locks the item row, and removing a listing cancels a pending request made through the
+inventory. Inventory rows are locked before item rows.
 
 Deleting locks the inventories the item is listed in, in ascending `id` order, then the
 item row. It re-reads the listings under those locks: a listing added after the first read
@@ -20,11 +20,10 @@ items. The unique index on (inventory, item) refuses a second listing with `Conf
 """
 
 from django.db import IntegrityError, transaction
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 
 from .errors import Conflict, violates
-from .inventories import lock_as
-from .models import ONE_LISTING_PER_ITEM, Inventory, InventoryItem, Item, LoanStatus, Role
+from .models import ONE_LISTING_PER_ITEM, Inventory, InventoryItem, Item, LoanStatus
 
 ITEM_NOT_FOUND = "Item not found."
 NOT_YOUR_ITEM = "You can list only your own items."
@@ -83,9 +82,8 @@ def delete_item(user, item_id):
 
 @transaction.atomic
 def add_listing(actor, item_id):
-    """Lists the item `item_id` in the actor's inventory. `actor` must be an admin or
-    owner, and is checked again with the inventory locked."""
-    actor = lock_as(actor.user_id, actor.inventory_id, Role.ADMIN)
+    """Lists the item `item_id` in the actor's inventory. `actor`, the caller's membership,
+    must be an admin or owner."""
     item = Item.objects.select_for_update().filter(pk=item_id, owner_id=actor.user_id).first()
     if item is None:
         raise ValidationError({"item_id": [NOT_YOUR_ITEM]})
@@ -98,25 +96,8 @@ def add_listing(actor, item_id):
         raise
 
 
-def get_listing(inventory_id, item_id):
-    """The listing of the item `item_id` in the inventory, with its item."""
-    listing = (
-        InventoryItem.objects.select_related("item")
-        .filter(inventory_id=inventory_id, item_id=item_id)
-        .first()
-    )
-    if listing is None:
-        raise NotFound(LISTING_NOT_FOUND)
-    return listing
-
-
 @transaction.atomic
-def remove_listing(user, inventory_id, item_id):
-    """Removes the item `item_id` from the inventory. An owner removes any item, and an
-    admin only their own."""
-    actor = lock_as(user.id, inventory_id, Role.ADMIN)
-    listing = get_listing(inventory_id, item_id)
-    if actor.role != Role.OWNER and listing.item.owner_id != user.id:
-        raise PermissionDenied(OWN_ITEMS_ONLY)
+def remove_listing(listing):
+    """Removes the listing and cancels a pending request made through its inventory."""
     listing.delete()
-    Item.objects.filter(pk=item_id).cancel_requests_through(inventory_id)
+    Item.objects.filter(pk=listing.item_id).cancel_requests_through(listing.inventory_id)

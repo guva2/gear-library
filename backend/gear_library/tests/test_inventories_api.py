@@ -503,12 +503,34 @@ class TestMyInvites:
         elif state == "gone":
             self.answer(people["pending"], invite, "decline")
 
-        for user in [people["member"], people["stranger"]]:
-            assert self.answer(user, invite, action).status_code == 404
+        other_invitee = make_user(6)
+        add_pending(people["inventory"], other_invitee, people["owner"])
+        owner_elsewhere = make_user(7)
+        elsewhere = Inventory.objects.create(name="Camping")
+        Membership.objects.create(
+            inventory=elsewhere, user=owner_elsewhere, role="owner", status="active"
+        )
 
-    def test_the_invitee_cannot_revoke_and_an_admin_cannot_accept(self, people, invite):
-        assert self.answer(people["pending"], invite, "revoke").status_code == 403
-        assert self.answer(people["admin"], invite, "accept").status_code == 403
+        for user in [people["member"], people["stranger"], other_invitee, owner_elsewhere]:
+            response = self.answer(user, invite, action)
+            assert (response.status_code, response.json()) == (
+                404,
+                {"detail": "Invite not found."},
+            )
+
+    @pytest.mark.parametrize(
+        "who, action", [("pending", "revoke"), ("admin", "accept"), ("admin", "decline")]
+    )
+    def test_the_invitee_cannot_revoke_and_an_admin_cannot_answer(
+        self, people, invite, who, action
+    ):
+        response = self.answer(people[who], invite, action)
+
+        assert (response.status_code, response.json()) == (
+            403,
+            {"detail": "You cannot do this with this invite."},
+        )
+        assert Membership.objects.get(pk=invite.pk).status == "pending"
 
     def test_an_unknown_invite_is_not_found(self, people):
         response = client_for(people["owner"]).post(f"{INVITES_URL}999999/accept/")

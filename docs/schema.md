@@ -147,22 +147,36 @@ These rules span tables, so the database cannot check them alone.
 
 ### Concurrency
 
-- Setting a role, removing a member and leaving lock the inventory's row
-  (`select_for_update`), then re-read the acting user's membership and role, the target
-  membership and the active owners. Two of these changes to one inventory run one at a
-  time, so the inventory always keeps an owner.
-- Deleting an inventory locks its row (`select_for_update`), then deletes its memberships
-  and the row. Every operation that locks the inventory row does so before it touches a
-  membership row, so a delete and a role change, removal or leave on the same inventory
-  run one at a time.
-- Renaming an inventory, inviting, accepting, declining and revoking take no inventory
-  lock and no explicit lock.
+- Each request runs in one transaction, at `READ COMMITTED`. A request that fails rolls
+  back everything it changed.
+- These requests lock the inventory's row (`select_for_update`) before they read the
+  caller's membership, and hold the lock until they commit:
+  - `PATCH` and `DELETE /api/inventories/{id}/`
+  - `PATCH` and `DELETE /api/inventories/{id}/members/{user_id}/`
+  - `POST /api/inventories/{id}/invites/`
+  - `POST /api/inventories/{id}/items/`
+  - `DELETE /api/inventories/{id}/items/{item_id}/`
+  - `POST /api/inventories/{id}/items/{item_id}/borrow/`, `approve/`, `decline/` and
+    `return/`
+
+  Two of these on one inventory run one at a time, and each checks the caller's role,
+  the target membership, the listing and the owners as they are when it holds the lock.
+  So an inventory always keeps an owner, and a caller whose role was lowered or who left
+  in the meantime is refused (`403` or `404`). A request that waits for a delete of the
+  inventory gets `404`.
+- Each of these locks one inventory only. Deleting an item is the only operation that
+  locks several (see below). Reads (`GET`) take no lock.
+- Creating an inventory, accepting, declining and revoking an invite, connection changes,
+  creating and editing an item, cancelling a request and the item owner's mark returned
+  take no inventory lock.
+- Revoking checks that the caller is an admin or owner without the inventory lock. A
+  revoke that read the caller's role just before an owner lowered it still deletes the
+  invite.
 - Inviting checks that the invitee is an accepted connection of the sender, then inserts a
   pending membership. The unique index on (`inventory_id`, `user_id`) refuses it when the
-  user is already a member or invited (`409`). Two invites to the same user at once: the
-  second waits on the index until the first commits, then gets `409`.
+  user is already a member or invited (`409`).
 - Accepting is one conditional update: `SET status = 'active'` where the row is the
-  caller's and `status = 'pending'`. If the row is already active, accepting returns it
+  invite and `status = 'pending'`. If the row is already active, accepting returns it
   (`200`). If the row is gone, accepting gets `404`.
 - Declining and revoking are each one conditional delete of the row where
   `status = 'pending'`. If the row is gone, the action gets `404`. If it is active, it was
@@ -170,10 +184,6 @@ These rules span tables, so the database cannot check them alone.
 - An accept and a delete of the same inventory wait on the membership row, so they run one
   at a time. A delete after the accept deletes the new member. An accept after the delete
   gets `404`.
-- The foreign key from memberships to the inventory is checked at commit. An invite whose
-  inventory was deleted first gets `404`. An invite that commits while a delete holds the
-  inventory lock waits for the delete, then gets `404`. A delete that starts after an
-  invite commits deletes the new pending membership with the inventory.
 - Connection changes take no explicit lock. Requesting inserts a pending row. When the
   unique index on the pair refuses it, the request accepts the other user's pending
   request with one conditional update (`status = 'pending'` and `requested_by_id` is the
@@ -184,33 +194,28 @@ These rules span tables, so the database cannot check them alone.
   one where `status = 'accepted'`. If no row matches, a row that is gone gets `404` and a
   row in the other status gets `409`, except that accepting a row that is already
   accepted returns it.
-- Listing an item locks the inventory's row (`select_for_update`), then the item's row.
-  Unlisting locks the inventory's row, deletes the listing, then cancels a pending request
-  made through the inventory. Borrow requests, approvals, declines and mark returned
-  through an inventory lock its row first, then check that the item is listed there.
-- After locking, the operation re-reads and re-checks the rows it depends on, including the
-  acting user's own membership and role.
+- Listing an item locks the item's row after the inventory's. Removing a listing deletes
+  it, then cancels a pending request made through the inventory.
 - Requesting is one conditional update on the item where `loan_status = 'available'`.
   Approve, decline and mark returned through an inventory are each one conditional update
   that matches the `loan_status`, `borrower_id` and `loan_inventory_id` the acting user
   saw. If no row matches, the request or loan changed in the meantime and the action gets
   `409`.
-- Cancelling and the item owner's mark returned take no inventory lock. Each is one
-  conditional update on the item: cancelling matches `loan_status = 'requested'` and the
-  caller as `borrower_id`, and the owner's mark returned matches `loan_status = 'on_loan'`
-  and the `borrower_id` the owner saw. A pending request ends when its requester leaves
-  the loan inventory or the item leaves it, so a cancel needs no membership or listing
-  check. A cancel and an approval of the same request wait on the item row, and the second
-  one gets `409`.
+- Cancelling and the item owner's mark returned are each one conditional update on the
+  item: cancelling matches `loan_status = 'requested'` and the caller as `borrower_id`, and
+  the owner's mark returned matches `loan_status = 'on_loan'` and the `borrower_id` the
+  owner saw. A pending request ends when its requester leaves the loan inventory or the
+  item leaves it, so a cancel needs no membership or listing check. A cancel and an
+  approval of the same request wait on the item row, and the second one gets `409`.
 - The automatic cancels are conditional updates too: they match `loan_status = 'requested'`
   and the `loan_inventory_id` being left or removed. Each runs under that inventory's lock.
 - Deleting an item reads the inventories it is listed in, locks them (`select_for_update`)
   in ascending `id` order, then locks the item row. It then re-reads the item's listings.
   A listing added in between is in an inventory it has not locked, and taking that lock
-  after the item row would reverse the lock order, so the delete rolls back and starts
-  again. An item `on_loan` gets `409`. Otherwise the delete removes the listings and the
-  row. A listing that waits on the delete's item lock finds the item gone (`400` on
-  `item_id`).
+  after the item row would reverse the lock order, so the delete rolls back to before its
+  locks and starts again. An item `on_loan` gets `409`. Otherwise the delete removes the
+  listings and the row. A listing that waits on the delete's item lock finds the item gone
+  (`400` on `item_id`).
 
 ### Inventories and roles
 

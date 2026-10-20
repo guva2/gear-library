@@ -15,7 +15,7 @@ an accepted connection returns it.
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 
 from .errors import NO_SUCH_USER, Conflict, violates
 from .models import ONE_CONNECTION_PER_PAIR, Connection, ConnectionStatus, ordered_pair
@@ -80,25 +80,6 @@ def _accept_theirs(user, other):
         return pair.select_related("first_user", "second_user").get()
 
 
-def _connection_for(user, connection_id):
-    """The connection `connection_id`, if `user` is one of its two users. Anyone else gets
-    `NotFound`. Its status is not checked here."""
-    found = (
-        Connection.objects.involving(user)
-        .select_related("first_user", "second_user")
-        .filter(pk=connection_id)
-        .first()
-    )
-    if found is None:
-        raise NotFound(NOT_FOUND)
-    return found
-
-
-def _refuse_requester(found, user):
-    if found.requested_by_id == user.pk:
-        raise PermissionDenied(RECEIVER_ONLY)
-
-
 def _gone_or_conflict(connection_id, wrong_status):
     """Called when a conditional change matched no row."""
     if Connection.objects.filter(pk=connection_id).exists():
@@ -112,11 +93,13 @@ def _delete_if(found, status, wrong_status):
     _gone_or_conflict(found.pk, wrong_status)
 
 
-def accept(user, connection_id):
-    """Accepts a pending request the caller received and returns the connection. Accepting
-    a connection that is already accepted returns it unchanged."""
-    found = _connection_for(user, connection_id)
-    _refuse_requester(found, user)
+# `found` below is a connection of the caller's that they may act on this way, read before
+# the action; its status is checked by the action.
+
+
+def accept(found):
+    """Accepts a pending request and returns the connection. Accepting a connection that is
+    already accepted returns it unchanged."""
     if not Connection.objects.pending().filter(pk=found.pk).update(
         status=ConnectionStatus.ACCEPTED
     ):
@@ -126,22 +109,11 @@ def accept(user, connection_id):
     return found
 
 
-def decline(user, connection_id):
-    """Deletes a pending request the caller received."""
-    found = _connection_for(user, connection_id)
-    _refuse_requester(found, user)
+def delete_request(found):
+    """Declines or cancels a pending request by deleting it."""
     _delete_if(found, ConnectionStatus.PENDING, NOT_PENDING)
 
 
-def cancel(user, connection_id):
-    """Deletes a pending request the caller sent."""
-    found = _connection_for(user, connection_id)
-    if found.requested_by_id != user.pk:
-        raise PermissionDenied(REQUESTER_ONLY)
-    _delete_if(found, ConnectionStatus.PENDING, NOT_PENDING)
-
-
-def remove(user, connection_id):
-    """Deletes an accepted connection. Either user may."""
-    found = _connection_for(user, connection_id)
+def remove(found):
+    """Deletes an accepted connection."""
     _delete_if(found, ConnectionStatus.ACCEPTED, NOT_CONNECTED)

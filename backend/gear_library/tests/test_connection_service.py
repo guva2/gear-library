@@ -3,7 +3,7 @@ import threading
 import pytest
 from django.contrib.auth import get_user_model
 from django.db import connection, transaction
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 
 from gear_library import connections
 from gear_library.errors import Conflict
@@ -97,15 +97,13 @@ class TestRequest:
         assert status_of(theirs.pk) == "accepted"
 
     def test_can_request_again_after_a_decline_cancel_or_remove(self, ada, bob):
-        for finish in ["decline", "cancel", "remove"]:
+        for finish in ["delete", "remove"]:
             request = connections.request_connection(ada, bob.phone_number)
-            if finish == "decline":
-                connections.decline(bob, request.id)
-            elif finish == "cancel":
-                connections.cancel(ada, request.id)
+            if finish == "delete":
+                connections.delete_request(request)
             else:
-                connections.accept(bob, request.id)
-                connections.remove(ada, request.id)
+                connections.accept(request)
+                connections.remove(request)
 
         assert connections.request_connection(ada, bob.phone_number).status == "pending"
 
@@ -128,149 +126,66 @@ class TestRequest:
 
 @pytest.mark.django_db
 class TestAnswer:
+    """Each action takes the connection as the caller read it."""
+
     @pytest.fixture
     def request_(self, ada, bob):
         return add(ada, bob)
 
-    def test_the_other_user_accepts(self, bob, request_):
-        accepted = connections.accept(bob, request_.id)
+    def test_accepting(self, request_):
+        accepted = connections.accept(request_)
 
         assert (accepted.pk, accepted.status) == (request_.pk, "accepted")
         assert status_of(request_.pk) == "accepted"
 
-    def test_the_other_user_declines(self, bob, request_):
-        connections.decline(bob, request_.id)
+    def test_declining_or_cancelling(self, request_):
+        connections.delete_request(request_)
 
         assert status_of(request_.pk) is None
 
-    def test_the_requester_cancels(self, ada, request_):
-        connections.cancel(ada, request_.id)
+    def test_removing_an_accepted_connection(self, request_):
+        connections.accept(request_)
+
+        connections.remove(request_)
 
         assert status_of(request_.pk) is None
 
-    @pytest.mark.parametrize("by", ["ada", "bob"])
-    def test_either_user_removes_an_accepted_connection(self, ada, bob, request_, by):
-        connections.accept(bob, request_.id)
-
-        connections.remove(ada if by == "ada" else bob, request_.id)
-
-        assert status_of(request_.pk) is None
-
-    @pytest.mark.parametrize(
-        "action, by",
-        [
-            (connections.accept, "ada"),
-            (connections.decline, "ada"),
-            (connections.cancel, "bob"),
-        ],
-    )
-    @pytest.mark.parametrize("state", ["pending", "accepted"])
-    def test_the_wrong_one_of_the_two_is_forbidden(self, ada, bob, request_, action, by, state):
-        if state == "accepted":
-            connections.accept(bob, request_.id)
-
-        with pytest.raises(PermissionDenied):
-            action(ada if by == "ada" else bob, request_.id)
-        assert status_of(request_.pk) == state
-
-    @pytest.mark.parametrize(
-        "action, by",
-        [(connections.decline, "bob"), (connections.cancel, "ada")],
-    )
-    def test_answering_an_accepted_connection_conflicts(self, ada, bob, request_, action, by):
-        connections.accept(bob, request_.id)
+    def test_declining_or_cancelling_an_accepted_connection_conflicts(self, request_):
+        connections.accept(request_)
 
         with pytest.raises(Conflict) as excinfo:
-            action(ada if by == "ada" else bob, request_.id)
+            connections.delete_request(request_)
         assert excinfo.value.detail == "This is not a pending request."
         assert status_of(request_.pk) == "accepted"
 
-    def test_accepting_an_accepted_connection_returns_it(self, bob, request_):
-        connections.accept(bob, request_.id)
+    def test_accepting_an_accepted_connection_returns_it(self, request_):
+        connections.accept(request_)
 
-        again = connections.accept(bob, request_.id)
+        again = connections.accept(request_)
 
         assert again.pk == request_.pk
         assert status_of(request_.pk) == "accepted"
 
-    def test_removing_a_pending_request_conflicts(self, ada, request_):
+    def test_removing_a_pending_request_conflicts(self, request_):
         with pytest.raises(Conflict) as excinfo:
-            connections.remove(ada, request_.id)
+            connections.remove(request_)
         assert excinfo.value.detail == "You are not connected."
         assert status_of(request_.pk) == "pending"
 
-    ACTIONS = [
-        (connections.accept, "bob"),
-        (connections.decline, "bob"),
-        (connections.cancel, "ada"),
-        (connections.remove, "ada"),
-    ]
-
-    @pytest.mark.parametrize("action, by", ACTIONS)
-    def test_a_connection_that_is_gone_is_not_found(self, ada, bob, request_, action, by):
+    @pytest.mark.parametrize(
+        "action", [connections.accept, connections.delete_request, connections.remove]
+    )
+    def test_a_connection_deleted_after_it_was_read_is_not_found(self, request_, action):
         Connection.objects.all().delete()
 
         with pytest.raises(NotFound) as excinfo:
-            action(ada if by == "ada" else bob, request_.id)
+            action(request_)
         assert excinfo.value.detail == "Connection not found."
 
-    @pytest.mark.parametrize("action, by", ACTIONS)
-    @pytest.mark.parametrize("state", ["pending", "accepted"])
-    def test_anyone_else_gets_not_found_whatever_the_state(self, request_, action, by, state):
-        Connection.objects.filter(pk=request_.pk).update(status=state)
-        stranger = make_user(9)
+    def test_a_request_accepted_after_it_was_read_is_returned_by_accept(self, request_):
+        Connection.objects.filter(pk=request_.pk).update(status="accepted")
 
-        with pytest.raises(NotFound):
-            action(stranger, request_.id)
-        assert status_of(request_.pk) == state
-
-    def hook_after_reading(self, monkeypatch, change):
-        """Runs `change(found)` after the action has read the connection and checked
-        access."""
-        connection_for = connections._connection_for
-
-        def change_after_reading(*args, **kwargs):
-            found = connection_for(*args, **kwargs)
-            change(found)
-            return found
-
-        monkeypatch.setattr(connections, "_connection_for", change_after_reading)
-
-    @pytest.mark.parametrize("action, by", ACTIONS)
-    def test_a_connection_deleted_after_it_was_read_is_not_found(
-        self, ada, bob, request_, monkeypatch, action, by
-    ):
-        if action is connections.remove:
-            connections.accept(bob, request_.id)
-        self.hook_after_reading(
-            monkeypatch, lambda found: Connection.objects.filter(pk=found.pk).delete()
-        )
-
-        with pytest.raises(NotFound):
-            action(ada if by == "ada" else bob, request_.id)
-
-    def test_a_request_accepted_after_it_was_read_is_returned_by_accept(
-        self, bob, request_, monkeypatch
-    ):
-        self.hook_after_reading(
-            monkeypatch,
-            lambda found: Connection.objects.filter(pk=found.pk).update(status="accepted"),
-        )
-
-        assert connections.accept(bob, request_.id).pk == request_.pk
-
-    @pytest.mark.parametrize("action, by", ACTIONS[1:3])
-    def test_a_request_accepted_after_it_was_read_conflicts(
-        self, ada, bob, request_, monkeypatch, action, by
-    ):
-        self.hook_after_reading(
-            monkeypatch,
-            lambda found: Connection.objects.filter(pk=found.pk).update(status="accepted"),
-        )
-
-        with pytest.raises(Conflict):
-            action(ada if by == "ada" else bob, request_.id)
-        assert status_of(request_.pk) == "accepted"
+        assert connections.accept(request_).pk == request_.pk
 
 
 INSERT_CONNECTION = 'INSERT INTO "gear_library_connection" '
@@ -345,7 +260,7 @@ class TestCommittedRaces:
     def test_a_crossed_request_waits_for_a_cancel_and_becomes_a_new_request(self, ada, bob):
         request = connections.request_connection(bob, ada.phone_number)
         first, held, release = self.holding(
-            DELETE_CONNECTION, lambda: connections.cancel(bob, request.id)
+            DELETE_CONNECTION, lambda: connections.delete_request(request)
         )
         second = lambda: connections.request_connection(ada, bob.phone_number)
 
@@ -360,7 +275,7 @@ class TestCommittedRaces:
         first, held, release = self.holding(
             UPDATE_CONNECTION, lambda: connections.request_connection(ada, bob.phone_number)
         )
-        second = lambda: connections.cancel(bob, request.id)
+        second = lambda: connections.delete_request(request)
 
         outcomes = self.race(first, second, held, release)
 
@@ -371,9 +286,9 @@ class TestCommittedRaces:
     def test_a_decline_waits_for_a_cancel_and_is_not_found(self, ada, bob):
         request = connections.request_connection(ada, bob.phone_number)
         first, held, release = self.holding(
-            DELETE_CONNECTION, lambda: connections.cancel(ada, request.id)
+            DELETE_CONNECTION, lambda: connections.delete_request(request)
         )
-        second = lambda: connections.decline(bob, request.id)
+        second = lambda: connections.delete_request(request)
 
         outcomes = self.race(first, second, held, release)
 
@@ -384,9 +299,9 @@ class TestCommittedRaces:
     def test_a_cancel_waits_for_an_accept_and_conflicts(self, ada, bob):
         request = connections.request_connection(ada, bob.phone_number)
         first, held, release = self.holding(
-            UPDATE_CONNECTION, lambda: connections.accept(bob, request.id)
+            UPDATE_CONNECTION, lambda: connections.accept(request)
         )
-        second = lambda: connections.cancel(ada, request.id)
+        second = lambda: connections.delete_request(request)
 
         outcomes = self.race(first, second, held, release)
 

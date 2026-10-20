@@ -55,6 +55,8 @@ DATABASES = {
         "PASSWORD": os.environ["POSTGRES_PASSWORD"],
         "HOST": os.environ.get("POSTGRES_HOST", "db"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        # Each request is one transaction. DRF rolls it back when a view raises an error.
+        "ATOMIC_REQUESTS": True,
     }
 }
 
