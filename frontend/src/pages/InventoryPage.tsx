@@ -130,7 +130,7 @@ function InventoryView({ base }: { base: string }) {
   async function leaveOrDelete(path: string) {
     const failed = await send(path, "DELETE");
     if (failed) setErrors(failed.errors);
-    else navigate("/");
+    else navigate("/manage/inventories");
   }
 
   if (page.status === "loading") return <p>Loading…</p>;
@@ -147,7 +147,7 @@ function InventoryView({ base }: { base: string }) {
       <h2>{inventory.name}</h2>
       <p>Your role: {inventory.role}</p>
       <p>
-        <Link to="/">My inventories</Link>
+        <Link to="/manage/inventories">My inventories</Link>
       </p>
       <FormErrors errors={refusal} />
       <FormErrors errors={errors} />
@@ -519,7 +519,7 @@ function Items({
           unknown="That item"
           empty={
             <>
-              No items to list. Add gear in <Link to="/gear">My gear</Link>.
+              No items to list. Add gear in <Link to="/manage/items">My items</Link>.
             </>
           }
           path={`${base}items/`}

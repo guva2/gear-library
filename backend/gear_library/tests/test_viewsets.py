@@ -53,6 +53,8 @@ ROUTES = {
     ("items/{id}/return/", "POST"),
     ("borrowing/", "GET"),
     ("borrowing/{id}/cancel/", "POST"),
+    ("discover/", "GET"),
+    ("lending/", "GET"),
 }
 
 

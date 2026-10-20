@@ -21,7 +21,8 @@ export function empty(status: number): Handler {
   return () => new Response(null, { status });
 }
 
-// A signed-in user with no inventories, invites, connections, requests, items or borrowing.
+// A signed-in user with no inventories, invites, connections, requests, items, loans or
+// items to discover.
 const DEFAULTS: Record<string, Handler> = {
   "GET /api/auth/csrf/": empty(204),
   "GET /api/health/": json(200, { status: "ok", database: "ok" }),
@@ -31,6 +32,8 @@ const DEFAULTS: Record<string, Handler> = {
   "GET /api/connections/requests/": json(200, { received: [], sent: [] }),
   "GET /api/items/": json(200, []),
   "GET /api/borrowing/": json(200, []),
+  "GET /api/discover/": json(200, []),
+  "GET /api/lending/": json(200, []),
 };
 
 /**

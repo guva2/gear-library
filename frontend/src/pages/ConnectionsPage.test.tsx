@@ -42,6 +42,11 @@ async function open() {
   await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
 }
 
+/** The page, without the sidebar and its health line. */
+function inMain() {
+  return within(screen.getByRole("main"));
+}
+
 function region(name: string) {
   return screen.getByRole("region", { name });
 }
@@ -85,11 +90,11 @@ describe("my connections", () => {
     );
   });
 
-  it("is reached from the home page", async () => {
+  it("is reached from the sidebar", async () => {
     signedIn();
-    renderAt("/");
+    renderAt("/manage");
 
-    fireEvent.click(await screen.findByRole("link", { name: "My connections" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Connections" }));
 
     expect(await screen.findByRole("heading", { name: "My connections" })).toBeInTheDocument();
   });
@@ -235,7 +240,7 @@ describe("answering requests", () => {
     fillIn("Phone number", "5551230007");
     fireEvent.click(screen.getByRole("button", { name: "Send request" }));
 
-    expect(await screen.findByRole("status")).toBeInTheDocument();
+    expect(await inMain().findByRole("status")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -286,7 +291,9 @@ describe("sending a request", () => {
 
     await send("(555) 123-0007");
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Request sent to (555) 123-0007.");
+    expect(await inMain().findByRole("status")).toHaveTextContent(
+      "Request sent to (555) 123-0007.",
+    );
     await waitFor(() => expect(items("Requests sent")).toEqual(["(555) 123-0004", "(555) 123-0007"]));
     expect(backend.requests("POST /api/connections/")).toEqual([
       { phone_number: "(555) 123-0007" },
@@ -308,12 +315,14 @@ describe("sending a request", () => {
     }));
     await open();
     await send("5551230007");
-    expect(await screen.findByRole("status")).toHaveTextContent("Request sent to (555) 123-0007.");
+    expect(await inMain().findByRole("status")).toHaveTextContent(
+      "Request sent to (555) 123-0007.",
+    );
 
     fireEvent.click(await screen.findByRole("button", { name: "Cancel request to (555) 123-0007" }));
 
     await waitFor(() => expect(items("Requests sent")).toEqual(["(555) 123-0004"]));
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(inMain().queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("says when the request connected at once", async () => {
@@ -333,7 +342,7 @@ describe("sending a request", () => {
 
     await send("5551230003");
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    expect(await inMain().findByRole("status")).toHaveTextContent(
       "You are now connected with Cy Young.",
     );
     await waitFor(() => expect(items("Requests received")).toEqual([]));
@@ -352,7 +361,7 @@ describe("sending a request", () => {
       expect(phone).toHaveAccessibleDescription("No user has this phone number."),
     );
     await waitFor(() => expect(phone).toHaveFocus());
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(inMain().queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("shows a conflict for the whole form", async () => {

@@ -10,7 +10,7 @@ export const LOAN_STATUS_LABELS: Record<LoanStatus, string> = {
   on_loan: "On loan",
 };
 
-interface InventoryRef {
+export interface InventoryRef {
   id: number;
   name: string;
 }
@@ -50,6 +50,29 @@ export interface BorrowedItem {
   loan_status: "requested" | "on_loan";
   owner: PersonName;
   loan_inventory: InventoryRef | null;
+}
+
+/** An item listed in the signed-in user's inventories that someone else owns. */
+export interface DiscoverItem {
+  id: number;
+  name: string;
+  description: string;
+  owner: PersonName;
+  loan_status: LoanStatus;
+  /** True when the signed-in user is the requester or the borrower. */
+  borrowed_by_me: boolean;
+  /** The signed-in user's inventories it is listed in. */
+  inventories: InventoryRef[];
+}
+
+/** A request or loan of someone else that the signed-in user may answer or close. */
+export interface LendingItem extends Omit<Item, "loan_status" | "borrower"> {
+  loan_status: "requested" | "on_loan";
+  borrower: User;
+  /** `null` when the item is the signed-in user's own. */
+  owner: PersonName | null;
+  /** True when the signed-in user may approve or decline the request. */
+  can_answer: boolean;
 }
 
 /** The name, then the description when there is one. */

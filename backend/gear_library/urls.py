@@ -12,6 +12,8 @@ router.register("invites", views.InviteViewSet, basename="invite")
 router.register("connections", views.ConnectionViewSet, basename="connection")
 router.register("items", views.ItemViewSet, basename="item")
 router.register("borrowing", views.BorrowingViewSet, basename="borrowing")
+router.register("discover", views.DiscoverViewSet, basename="discover")
+router.register("lending", views.LendingViewSet, basename="lending")
 
 inventory_router = NestedSimpleRouter(
     router, "inventories", lookup="inventory", use_regex_path=False

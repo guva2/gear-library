@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ADA, empty, fakeBackend, json } from "./test-backend";
 import { fillIn, renderAt } from "./test-render";
@@ -6,13 +6,12 @@ import { fillIn, renderAt } from "./test-render";
 const ANONYMOUS = json(403, { detail: "Authentication credentials were not provided." });
 
 describe("home page", () => {
-  it("shows who is signed in, their phone number and the health line", async () => {
+  it("shows who is signed in and the health line", async () => {
     fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
 
     renderAt("/");
 
     expect(await screen.findByText("Signed in as Ada Lovelace")).toBeInTheDocument();
-    expect(screen.getByText("(555) 123-4567")).toBeInTheDocument();
     expect(await screen.findByText("Backend and database are ok.")).toBeInTheDocument();
   });
 
@@ -218,5 +217,86 @@ describe("register page", () => {
 
     await screen.findByText("This field may not be blank.");
     await waitFor(() => expect(screen.getByLabelText("First name")).toHaveFocus());
+  });
+});
+
+describe("layout", () => {
+  const PAGES = ["Discover", "Manage", "Loans", "Connections"];
+
+  function current(name: string) {
+    const nav = screen.getByRole("navigation", { name });
+    return within(nav)
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("aria-current") === "page")
+      .map((link) => link.textContent);
+  }
+
+  it.each([
+    ["/", "Discover"],
+    ["/manage/items", "Manage"],
+    ["/inventories/7", "Manage"],
+    ["/loans", "Loans"],
+    ["/connections", "Connections"],
+  ])("marks the current page in the sidebar at %s", async (path, page) => {
+    fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
+
+    renderAt(path);
+
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(PAGES);
+    expect(current("Main")).toEqual([page]);
+  });
+
+  it("links each sidebar entry to its page", async () => {
+    fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
+
+    renderAt("/");
+
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    expect(within(nav).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+      "/",
+      "/manage",
+      "/loans",
+      "/connections",
+    ]);
+  });
+
+  it("opens the Inventories tab at /manage", async () => {
+    fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
+
+    renderAt("/manage");
+
+    expect(await screen.findByRole("heading", { name: "My inventories" })).toBeInTheDocument();
+    expect(current("Manage")).toEqual(["Inventories"]);
+  });
+
+  it("switches Manage tabs through the URL", async () => {
+    fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
+    renderAt("/manage/inventories");
+    await screen.findByRole("heading", { name: "My inventories" });
+
+    fireEvent.click(screen.getByRole("link", { name: "My items" }));
+
+    expect(await screen.findByRole("region", { name: "My items" })).toBeInTheDocument();
+    expect(current("Manage")).toEqual(["My items"]);
+    expect(screen.queryByRole("heading", { name: "My inventories" })).toBeNull();
+  });
+
+  it("shows not found at /gear", async () => {
+    fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
+
+    renderAt("/gear");
+
+    expect(await screen.findByText(/Page not found\./)).toBeInTheDocument();
+  });
+
+  it("shows the login form without a sidebar", async () => {
+    fakeBackend({});
+
+    renderAt("/login");
+
+    expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Log out" })).toBeNull();
   });
 });

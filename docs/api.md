@@ -534,3 +534,56 @@ No body. Cancels the caller's pending request.
 - `404` `{"detail": "Request not found."}` when the caller has not requested or borrowed
   the item.
 - `409` `{"detail": "This request was approved, so it cannot be cancelled."}`.
+
+## Discover and lending (M11)
+
+| Method | Path | Who | Main errors |
+|---|---|---|---|
+| `GET` | `/api/discover/` | Logged in. Items listed in the caller's inventories that someone else owns. | |
+| `GET` | `/api/lending/` | Logged in. Requests and loans the caller may answer or close. | |
+
+Both count only the inventories where the caller is an active member: a pending invite
+adds nothing.
+
+### Discover item
+
+What `GET /api/discover/` returns: every item listed in at least one of the caller's
+inventories, apart from the caller's own items, once per item however many of those
+inventories list it. Available items come first, then the rest; each group is sorted by
+name.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | The item's id. |
+| `name` | string | |
+| `description` | string | `""` when there is none. |
+| `owner` | object | `first_name` and `last_name` only. |
+| `loan_status` | string | `available`, `requested` or `on_loan`. |
+| `borrowed_by_me` | boolean | `true` when the caller is the requester or the borrower. |
+| `inventories` | list | The caller's inventories the item is listed in, sorted by name. Each has `id` and `name`. Request the item through one of them. |
+
+As for a `member` in a [Listed item](#listed-item), the requester or borrower is never
+shown.
+
+### Lending item
+
+What `GET /api/lending/` returns, as a list sorted by name: each item that is requested
+or on loan, whose requester or borrower is not the caller, and where either
+
+- the caller owns the item, or
+- the caller is an admin or owner of its loan inventory, and the item is listed there.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | The item's id. |
+| `name` | string | |
+| `description` | string | `""` when there is none. |
+| `inventories` | list | The caller's inventories the item is listed in, sorted by name. Each has `id` and `name`. For the caller's own item this is every inventory it is listed in, as in [Item](#item). |
+| `loan_status` | string | `requested` or `on_loan`. |
+| `borrower` | object | The requester or borrower: `id`, `first_name`, `last_name` and `phone_number`. |
+| `loan_inventory` | object or `null` | `id` and `name`. `null` for a loan of the caller's own item whose inventory was deleted. |
+| `owner` | object or `null` | The item's owner, `first_name` and `last_name` only. `null` when the caller owns the item. |
+| `can_answer` | boolean | `true` when the item is `requested` and the caller is an admin or owner of the loan inventory, so `approve` and `decline` under it are allowed. |
+
+A loan of the caller's own item is marked returned with `POST /api/items/{id}/return/`;
+any other through `POST /api/inventories/{loan_inventory.id}/items/{id}/return/`.

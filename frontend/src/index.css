@@ -1,0 +1,400 @@
+/*
+ * Colors are custom properties so the dark scheme only swaps values. Every text color is
+ * at least 4.5:1 against the background it sits on, and control borders and the focus ring
+ * at least 3:1 (WCAG AA).
+ */
+:root {
+  color-scheme: light;
+  --bg: #faf6f1;
+  --surface: #ffffff;
+  --surface-muted: #efe6dc;
+  --text: #2b1d14;
+  --text-muted: #5e4a3c;
+  --border: #e3d5c6;
+  --control-border: #8a6f5a;
+  --accent: #7a4a26;
+  --accent-hover: #5f381b;
+  --on-accent: #ffffff;
+  --link: #7a4a26;
+  --focus: #b8742f;
+  --error: #9b1c1c;
+  --sidebar-bg: #3e2a1e;
+  --sidebar-text: #f5ebe0;
+  --sidebar-current: #5c3d29;
+  --sidebar-mark: #e0b88a;
+  --radius: 6px;
+  --gap: 1rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #1c1410;
+    --surface: #2a1f18;
+    --surface-muted: #221913;
+    --text: #f2e8de;
+    --text-muted: #c7b29f;
+    --border: #4a382c;
+    --control-border: #9c8270;
+    --accent: #d9a877;
+    --accent-hover: #e8c29b;
+    --on-accent: #1c1410;
+    --link: #e8b98a;
+    --focus: #e8b98a;
+    --error: #ffb4a8;
+    --sidebar-bg: #140e0b;
+    --sidebar-text: #f2e8de;
+    --sidebar-current: #3a2a20;
+    --sidebar-mark: #d9a877;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  margin: 0 0 0.75rem;
+}
+
+h2 {
+  font-size: 1.6rem;
+}
+
+h3 {
+  font-size: 1.15rem;
+}
+
+p {
+  margin: 0 0 0.75rem;
+}
+
+a {
+  color: var(--link);
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+button {
+  font: inherit;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+input,
+select {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  max-width: 100%;
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+input[aria-describedby] + span,
+[role="alert"] {
+  color: var(--error);
+}
+
+label {
+  font-weight: 600;
+}
+
+fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0 0 0.75rem;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 0.75rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+section > ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+}
+
+section > ul > li {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+section > ul > li:last-child {
+  border-bottom: none;
+}
+
+section > ul > li > p:last-child {
+  margin-bottom: 0;
+}
+
+/* Signed in: a sidebar beside the page. */
+
+.app {
+  display: grid;
+  grid-template-columns: 15rem 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: 1.25rem var(--gap);
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+}
+
+.brand {
+  font-size: 1.3rem;
+}
+
+.sidebar nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sidebar nav a {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid transparent;
+  border-radius: var(--radius);
+  color: var(--sidebar-text);
+  text-decoration: none;
+}
+
+.sidebar nav a:hover {
+  background: var(--sidebar-current);
+}
+
+.sidebar nav a[aria-current="page"] {
+  background: var(--sidebar-current);
+  border-left-color: var(--sidebar-mark);
+  font-weight: 700;
+}
+
+.sidebar :focus-visible {
+  outline-color: var(--sidebar-mark);
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  font-size: 0.9rem;
+}
+
+.sidebar-footer [role="alert"] {
+  color: var(--sidebar-mark);
+}
+
+.sidebar-footer button {
+  background: transparent;
+  border-color: var(--sidebar-text);
+  color: var(--sidebar-text);
+  margin-bottom: 0.75rem;
+}
+
+.sidebar-footer button:hover {
+  background: var(--sidebar-current);
+}
+
+.content {
+  padding: 1.5rem 2rem;
+  max-width: 60rem;
+  width: 100%;
+}
+
+/* Narrow screens: the sidebar becomes a top bar. */
+@media (max-width: 48rem) {
+  .app {
+    display: block;
+  }
+
+  .sidebar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 0.75rem var(--gap);
+  }
+
+  .sidebar .brand {
+    margin: 0;
+  }
+
+  .sidebar nav {
+    width: 100%;
+  }
+
+  .sidebar nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  .sidebar nav a {
+    border-left: none;
+    border-bottom: 3px solid transparent;
+    padding: 0.35rem 0.6rem;
+  }
+
+  .sidebar nav a[aria-current="page"] {
+    border-bottom-color: var(--sidebar-mark);
+  }
+
+  .sidebar-footer {
+    margin: 0 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .sidebar-footer p,
+  .sidebar-footer button {
+    margin: 0;
+  }
+
+  .content {
+    padding: var(--gap);
+  }
+}
+
+/* Logged out: one centered form. */
+
+.public {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--gap);
+}
+
+.panel {
+  width: 100%;
+  max-width: 24rem;
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.panel input {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+/* Tabs that are links: the open one has aria-current="page". */
+
+.tabs ul {
+  display: flex;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0 0 var(--gap);
+  padding: 0;
+  border-bottom: 1px solid var(--control-border);
+}
+
+.tabs a {
+  display: block;
+  padding: 0.5rem 1rem;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.tabs a[aria-current="page"] {
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
+/* Discover cards. */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--gap);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  padding: var(--gap);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.card > :last-child {
+  margin-top: auto;
+  margin-bottom: 0;
+}
+
+.meta {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.status {
+  font-weight: 600;
+}
+
+/* Greyed out through muted colors, not opacity, so the text keeps its contrast. */
+.card.unavailable {
+  background: var(--surface-muted);
+  border-style: dashed;
+  border-color: var(--control-border);
+  color: var(--text-muted);
+}

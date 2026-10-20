@@ -3,6 +3,7 @@ from io import StringIO
 import pytest
 from django.contrib.auth import authenticate, get_user_model
 from django.core.management import call_command
+from rest_framework.test import APIClient
 
 from gear_library.models import (
     Connection,
@@ -302,3 +303,15 @@ def test_lends_a_new_demo_item_only_while_the_borrower_is_a_member_where_it_is_l
         assert Membership.objects.active().filter(
             inventory=item.loan_inventory, user=item.borrower
         ).exists()
+
+
+@pytest.mark.django_db
+def test_every_demo_user_has_something_to_discover_and_a_loan_to_see():
+    seed()
+
+    for user in User.objects.all():
+        client = APIClient()
+        client.force_authenticate(user)
+        loans = client.get("/api/lending/").json() + client.get("/api/borrowing/").json()
+        assert client.get("/api/discover/").json(), user.first_name
+        assert loans, user.first_name

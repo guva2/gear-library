@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import DatabaseError, IntegrityError, connection, transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Case, Exists, OuterRef, Prefetch, Q, Value, When
 from django.middleware.csrf import get_token
 from rest_framework import serializers, status
 from rest_framework.decorators import (
@@ -23,7 +23,15 @@ from rest_framework.viewsets import GenericViewSet
 
 from . import connections, inventories, items, loans
 from .authentication import CsrfSessionAuthentication
-from .models import Connection, ConnectionStatus, InventoryItem, Item, Membership, Role
+from .models import (
+    Connection,
+    ConnectionStatus,
+    InventoryItem,
+    Item,
+    LoanStatus,
+    Membership,
+    Role,
+)
 from .permissions import (
     InventoryRole,
     IsAnonymous,
@@ -37,6 +45,7 @@ from .serializers import (
     BorrowedItemSerializer,
     BorrowerIdSerializer,
     ConnectionSerializer,
+    DiscoverItemSerializer,
     InventoryInviteSerializer,
     InventoryNameSerializer,
     InventorySerializer,
@@ -44,6 +53,7 @@ from .serializers import (
     ItemFieldsSerializer,
     ItemIdSerializer,
     ItemSerializer,
+    LendingItemSerializer,
     ListedItemSerializer,
     LoginSerializer,
     MemberSerializer,
@@ -533,3 +543,69 @@ class BorrowingViewSet(ApiViewSet):
     def cancel(self, request, **kwargs):
         loans.cancel(request.user, self.kwargs["id"])
         return _no_content()
+
+
+def _inventory_ids(user, roles=None):
+    """The ids of the inventories where `user` is an active member, with one of `roles`
+    when given."""
+    memberships = Membership.objects.active().filter(user=user)
+    if roles is not None:
+        memberships = memberships.filter(role__in=roles)
+    return memberships.values("inventory_id")
+
+
+def _visible_listings(user):
+    """A prefetch of each item's listings in `user`'s inventories, as `visible_listings`,
+    sorted by inventory name."""
+    listings = (
+        InventoryItem.objects.filter(inventory_id__in=_inventory_ids(user))
+        .select_related("inventory")
+        .order_by("inventory__name", "inventory_id")
+    )
+    return Prefetch("listings", queryset=listings, to_attr="visible_listings")
+
+
+class DiscoverViewSet(ApiViewSet):
+    """The items listed in the caller's inventories that someone else owns."""
+
+    def list(self, request):
+        user = request.user
+        listed = InventoryItem.objects.filter(inventory_id__in=_inventory_ids(user))
+        found = (
+            Item.objects.filter(pk__in=listed.values("item_id"))
+            .exclude(owner=user)
+            .select_related("owner")
+            .prefetch_related(_visible_listings(user))
+            .order_by(
+                Case(When(loan_status=LoanStatus.AVAILABLE, then=Value(0)), default=Value(1)),
+                "name",
+                "id",
+            )
+        )
+        serializer = DiscoverItemSerializer(found, many=True, context={"user": user})
+        return Response(serializer.data)
+
+
+class LendingViewSet(ApiViewSet):
+    """The requests and loans of someone else that the caller may answer or close: of the
+    caller's own items, and of items listed in an inventory where the caller is an admin or
+    owner, requested or lent through it."""
+
+    def list(self, request):
+        user = request.user
+        admin_of = set(
+            _inventory_ids(user, [Role.ADMIN, Role.OWNER]).values_list("inventory_id", flat=True)
+        )
+        listed_where_lent = InventoryItem.objects.filter(
+            item=OuterRef("pk"), inventory=OuterRef("loan_inventory")
+        )
+        found = (
+            Item.objects.filter(loan_status__in=[LoanStatus.REQUESTED, LoanStatus.ON_LOAN])
+            .exclude(borrower=user)
+            .filter(Q(owner=user) | Q(loan_inventory_id__in=admin_of) & Exists(listed_where_lent))
+            .select_related("owner", "borrower", "loan_inventory")
+            .prefetch_related(_visible_listings(user))
+            .order_by("name", "id")
+        )
+        context = {"user": user, "admin_of": admin_of}
+        return Response(LendingItemSerializer(found, many=True, context=context).data)

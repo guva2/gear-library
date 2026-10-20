@@ -727,14 +727,17 @@ describe("items", () => {
   it.each([
     ["every item is listed here", [MY_ITEMS[2]]],
     ["the user has no items", []],
-  ])("links to My gear when %s", async (_, mine) => {
+  ])("links to My items when %s", async (_, mine) => {
     withItems("admin", { "GET /api/items/": json(200, mine) });
 
     await open();
 
     const items = region("Items");
     expect(within(items).getByText(/No items to list\./)).toBeInTheDocument();
-    expect(within(items).getByRole("link", { name: "My gear" })).toHaveAttribute("href", "/gear");
+    expect(within(items).getByRole("link", { name: "My items" })).toHaveAttribute(
+      "href",
+      "/manage/items",
+    );
     expect(screen.queryByRole("combobox", { name: "Item" })).toBeNull();
   });
 
