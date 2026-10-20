@@ -13,8 +13,8 @@ item rows.
 Deleting locks the inventories the item is listed in, in ascending `id` order, then the
 item row. It re-reads the listings under those locks: a listing added after the first read
 is in an inventory not locked yet, and locking it while holding the item row would invert
-the order, so the delete starts again. An item on loan is not deleted (`Conflict`).
-Django's cascade deletes the listings and the row.
+the order, so the delete is refused (`Conflict`). An item on loan is not deleted
+(`Conflict`). Django's cascade deletes the listings and the row.
 
 An item that is not the caller's is a `ValidationError` on `item_id` with one message,
 whether it is missing or someone else's, so the caller learns nothing about other users'
@@ -33,6 +33,7 @@ ALREADY_LISTED = "This item is already listed in this inventory."
 LISTING_NOT_FOUND = "This item is not listed in this inventory."
 OWN_ITEMS_ONLY = "Only owners can remove other people's items."
 ON_LOAN = "This item is on loan. It can be deleted once it is returned."
+ITEM_CHANGED = "This item changed. Try again."
 
 
 def create_item(user, fields):
@@ -47,17 +48,13 @@ def update_item(user, item_id, fields):
         raise NotFound(ITEM_NOT_FOUND)
 
 
-class _ListedMeanwhile(Exception):
-    """The item was listed in an inventory the delete has not locked."""
-
-
 def _inventories_of(item):
     listed = InventoryItem.objects.filter(item_id=item.pk).values_list("inventory_id", flat=True)
     return set(listed)
 
 
 @transaction.atomic
-def _delete_item(user, item_id):
+def delete_item(user, item_id):
     item = Item.objects.filter(pk=item_id, owner=user).first()
     if item is None:
         raise NotFound(ITEM_NOT_FOUND)
@@ -68,18 +65,12 @@ def _delete_item(user, item_id):
         raise NotFound(ITEM_NOT_FOUND)
     if item.loan_status == LoanStatus.ON_LOAN:
         raise Conflict(ON_LOAN)
+    # The item was listed after the first read, in an inventory not locked here. Only the
+    # owner lists their item, so this needs the owner to list and delete the same item at
+    # once; it is not expected in practice.
     if not _inventories_of(item) <= locked:
-        raise _ListedMeanwhile
+        raise Conflict(ITEM_CHANGED)
     item.delete()
-
-
-def delete_item(user, item_id):
-    # Each new attempt follows a listing the item's owner committed in the meantime.
-    while True:
-        try:
-            return _delete_item(user, item_id)
-        except _ListedMeanwhile:
-            pass
 
 
 def add_listing(actor, item_id):

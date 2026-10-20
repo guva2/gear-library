@@ -218,8 +218,9 @@ These rules span tables, so the database cannot check them alone.
 - Deleting an item reads the inventories it is listed in, locks them (`select_for_update`)
   in ascending `id` order, then locks the item row. It then re-reads the item's listings.
   A listing added in between is in an inventory it has not locked, and taking that lock
-  after the item row would reverse the lock order, so the delete rolls back to before its
-  locks and starts again. An item `on_loan` gets `409`. Otherwise the delete removes the
+  after the item row would reverse the lock order, so the delete gets `409`. Only the
+  owner lists their item, so this needs the owner to list and delete the same item at
+  once. An item `on_loan` gets `409`. Otherwise the delete removes the
   listings and the row. A listing that waits on the delete's item lock finds the item gone
   (`400` on `item_id`).
 

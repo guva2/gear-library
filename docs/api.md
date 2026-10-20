@@ -365,7 +365,7 @@ cancelling an accepted connection is a `409`
 | `GET` | `/api/items/` | Logged in. The caller's own items. | |
 | `POST` | `/api/items/` | Logged in. The caller owns the new item. | `400` |
 | `PATCH` | `/api/items/{id}/` | The item's owner. | `400`, `404` |
-| `DELETE` | `/api/items/{id}/` | The item's owner. Deletes it and its listings. | `404`. `409`: on loan. |
+| `DELETE` | `/api/items/{id}/` | The item's owner. Deletes it and its listings. | `404`. `409`: on loan, or listed while being deleted. |
 
 Under `/api/items/{id}/`, an item that does not exist and an item the caller does not own
 are both `404` `{"detail": "Item not found."}`, even for a member who sees the item in an
@@ -397,8 +397,10 @@ What the `/api/items/` endpoints return. `GET` returns a list sorted by name.
 keyed by field.
 
 `DELETE` returns `204` with no body. An item on loan is a `409`
-`{"detail": "This item is on loan. It can be deleted once it is returned."}`. Deleting a
-requested item cancels the request.
+`{"detail": "This item is on loan. It can be deleted once it is returned."}`. An item
+listed in another inventory while it is being deleted is a `409`
+`{"detail": "This item changed. Try again."}`. Deleting a requested item cancels the
+request.
 
 ### Listings
 
