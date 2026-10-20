@@ -22,6 +22,16 @@ urlpatterns = [
         views.inventory_invites,
         name="inventory-invites",
     ),
+    path(
+        "inventories/<int:inventory_id>/items/",
+        views.inventory_items,
+        name="inventory-items",
+    ),
+    path(
+        "inventories/<int:inventory_id>/items/<int:item_id>/",
+        views.inventory_item_detail,
+        name="inventory-item-detail",
+    ),
     path("invites/", views.my_invites, name="my-invites"),
     path("invites/<int:invite_id>/accept/", views.accept_invite, name="accept-invite"),
     path("invites/<int:invite_id>/decline/", views.decline_invite, name="decline-invite"),
@@ -48,4 +58,6 @@ urlpatterns = [
         views.cancel_connection,
         name="cancel-connection",
     ),
+    path("items/", views.item_list, name="item-list"),
+    path("items/<int:item_id>/", views.item_detail, name="item-detail"),
 ]

@@ -6,6 +6,8 @@ from gear_library.models import (
     Connection,
     ConnectionStatus,
     Inventory,
+    InventoryItem,
+    Item,
     Membership,
     MembershipStatus,
     Role,
@@ -46,11 +48,27 @@ DEMO_CONNECTIONS = [
 ]
 
 
+# (owner, name, description, names of the demo inventories it is listed in). Each owner is
+# an admin or owner of those inventories. A later run skips an item whose owner already has
+# an item with its name, and so does not list it again.
+DEMO_ITEMS = [
+    (AVERY, "Climbing rope", "60 m dynamic rope, 9.8 mm.", ["Climbing Club"]),
+    (AVERY, "Belay device", "Tube style, with a locking carabiner.", ["Climbing Club"]),
+    (AVERY, "Headlamp", "", []),
+    (JORDAN, "Quickdraws", "A set of 12.", ["Climbing Club"]),
+    (JORDAN, "First aid kit", "For groups of up to 6.", ["Climbing Club", "Camping Crew"]),
+    (JORDAN, "Two-person tent", "Freestanding, 2 kg.", ["Camping Crew"]),
+    (SAM, "Camp stove", "Canister stove. Fuel not included.", ["Camping Crew"]),
+    (SAM, "Sleeping bag", "Rated to -5 °C.", ["Camping Crew"]),
+    (SAM, "Chalk bag", "", []),
+]
+
+
 class Command(BaseCommand):
     help = (
-        "Create the demo users, their inventories and their connections. Users and demo "
-        "inventories that already exist, and pairs that already have a connection or a "
-        "request, are left unchanged."
+        "Create the demo users, their inventories, connections and items. Users, demo "
+        "inventories and items that already exist, and pairs that already have a "
+        "connection or a request, are left unchanged."
     )
 
     @transaction.atomic
@@ -73,13 +91,20 @@ class Command(BaseCommand):
         demo_phone_numbers = [phone_number for phone_number, _, _ in DEMO_USERS]
         users = User.objects.in_bulk(demo_phone_numbers, field_name="phone_number")
         created = 0
+        inventories = {}
         for demo in DEMO_INVENTORIES:
             owner_phone = demo["members"][0][0]
-            if Membership.objects.active().filter(
-                inventory__name=demo["name"], user=users[owner_phone]
-            ).exists():
+            existing = (
+                Membership.objects.active()
+                .filter(inventory__name=demo["name"], user=users[owner_phone])
+                .order_by("inventory_id")
+                .first()
+            )
+            if existing is not None:
+                inventories[demo["name"]] = existing.inventory_id
                 continue
             inventory = Inventory.objects.create(name=demo["name"])
+            inventories[demo["name"]] = inventory.id
             for phone_number, role in demo["members"]:
                 Membership.objects.create(
                     inventory=inventory,
@@ -111,3 +136,19 @@ class Command(BaseCommand):
             created += 1
         existing = len(DEMO_CONNECTIONS) - created
         self.stdout.write(f"Created {created} demo connections; {existing} already existed.")
+
+        created = 0
+        for owner_phone, name, description, listed_in in DEMO_ITEMS:
+            owner = users[owner_phone]
+            if Item.objects.filter(owner=owner, name=name).exists():
+                continue
+            item = Item.objects.create(owner=owner, name=name, description=description)
+            for inventory_name in listed_in:
+                inventory_id = inventories[inventory_name]
+                if Membership.objects.active().filter(
+                    inventory_id=inventory_id, user=owner, role__in=[Role.ADMIN, Role.OWNER]
+                ).exists():
+                    InventoryItem.objects.create(inventory_id=inventory_id, item=item)
+            created += 1
+        existing = len(DEMO_ITEMS) - created
+        self.stdout.write(f"Created {created} demo items; {existing} already existed.")

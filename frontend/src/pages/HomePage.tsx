@@ -56,6 +56,9 @@ export default function HomePage() {
         Log out
       </button>
       <p>
+        <Link to="/gear">My gear</Link>
+      </p>
+      <p>
         <Link to="/connections">My connections</Link>
       </p>
       {lists.status === "loading" && <p>Loading…</p>}

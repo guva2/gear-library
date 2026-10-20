@@ -86,13 +86,14 @@ missing.
 docker compose run --rm backend python manage.py seed_demo
 ```
 
-creates three demo users, two inventories and the users' connections. Running it again
-changes nothing: users that already exist are left as they are, a demo inventory is skipped
-when its owner below is already in an inventory with that name, and a demo connection is
-skipped when the two users already have a connection or a request. A database seeded by an
-older version of this command therefore keeps its old connections; to reset them, delete the
-demo users' connections and run `seed_demo` again. Log in at <http://localhost:5173> with any
-of them, using the password `gear-library-demo`:
+creates three demo users, two inventories, the users' connections and their gear. Running it
+again changes nothing: users that already exist are left as they are, a demo inventory is
+skipped when its owner below is already in an inventory with that name, a demo connection is
+skipped when the two users already have a connection or a request, and a demo item is
+skipped, with its listings, when its owner already has an item with that name. A database
+seeded by an older version of this command therefore keeps its old connections; to reset
+them, delete the demo users' connections and run `seed_demo` again. Log in at
+<http://localhost:5173> with any of them, using the password `gear-library-demo`:
 
 | Phone number | Name | Climbing Club | Camping Crew |
 |---|---|---|---|
@@ -105,3 +106,15 @@ Connections:
 - Sam and Avery are connected.
 - Jordan and Sam are connected.
 - Avery has sent Jordan a request, which is pending.
+
+Gear, and where it is listed:
+
+| Owner | Item | Listed in |
+|---|---|---|
+| Avery | Climbing rope, Belay device | Climbing Club |
+| Avery | Headlamp | nowhere |
+| Jordan | Quickdraws | Climbing Club |
+| Jordan | First aid kit | Climbing Club and Camping Crew |
+| Jordan | Two-person tent | Camping Crew |
+| Sam | Camp stove, Sleeping bag | Camping Crew |
+| Sam | Chalk bag | nowhere |

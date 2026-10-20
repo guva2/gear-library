@@ -4,7 +4,14 @@ import pytest
 from django.contrib.auth import authenticate, get_user_model
 from django.core.management import call_command
 
-from gear_library.models import Connection, Inventory, Membership, ordered_pair
+from gear_library.models import (
+    Connection,
+    Inventory,
+    InventoryItem,
+    Item,
+    Membership,
+    ordered_pair,
+)
 
 User = get_user_model()
 
@@ -32,6 +39,8 @@ def snapshot():
                 "pk", "first_user", "second_user", "requested_by", "status"
             )
         ),
+        "items": set(Item.objects.values_list("pk", "owner", "name", "description")),
+        "listings": set(InventoryItem.objects.values_list("pk", "inventory", "item")),
     }
 
 
@@ -183,3 +192,61 @@ def test_leaves_a_real_users_connection_to_a_demo_user_alone():
 
     assert Connection.objects.filter(pk=real.pk, status="pending").exists()
     assert Connection.objects.count() == 4
+
+
+@pytest.mark.django_db
+def test_gives_every_demo_user_items_and_lists_some_in_every_inventory():
+    seed()
+
+    for user in User.objects.all():
+        assert user.items.exists()
+    for inventory in Inventory.objects.all():
+        assert inventory.listings.exists()
+    listing_counts = [item.listings.count() for item in Item.objects.all()]
+    assert 0 in listing_counts
+    assert max(listing_counts) > 1
+
+
+@pytest.mark.django_db
+def test_every_listing_is_by_an_admin_or_owner_of_its_inventory():
+    seed()
+
+    for listing in InventoryItem.objects.select_related("item"):
+        lister = Membership.objects.active().get(
+            inventory=listing.inventory_id, user=listing.item.owner_id
+        )
+        assert lister.role in ("admin", "owner")
+
+
+@pytest.mark.django_db
+def test_leaves_changed_demo_items_and_listings_alone():
+    seed()
+    item = Item.objects.filter(listings__isnull=False).first()
+    item.description = "Changed"
+    item.save()
+    item.listings.all().delete()
+
+    seed()
+
+    item.refresh_from_db()
+    assert item.description == "Changed"
+    assert not item.listings.exists()
+    assert Item.objects.filter(owner=item.owner, name=item.name).count() == 1
+
+
+@pytest.mark.django_db
+def test_lists_a_new_demo_item_only_where_its_owner_is_still_an_admin_or_owner():
+    seed()
+    Membership.objects.filter(role="admin").update(role="member")
+    InventoryItem.objects.all().delete()
+    Item.objects.all().delete()
+
+    seed()
+
+    assert Item.objects.exists()
+    assert InventoryItem.objects.exists()
+    for listing in InventoryItem.objects.select_related("item"):
+        lister = Membership.objects.get(
+            inventory=listing.inventory_id, user=listing.item.owner_id
+        )
+        assert lister.role == "owner"

@@ -101,18 +101,20 @@ row per pair of users.
 
 ### `Item` (`gear_library_item`)
 
-Built in M7. A piece of gear. A user owns it, and it can be listed in several inventories.
-It is one physical object, so its loan state is on this row, not per inventory.
+A piece of gear. A user owns it, and it can be listed in several inventories. It is one
+physical object, so its loan state is on this row, not per inventory.
 
-| Column | Type | Rules |
-|---|---|---|
-| `owner_id` | → `User` | `on_delete=models.PROTECT`. |
-| `name` | `varchar(64)` | |
-| `description` | `varchar(512)` | Optional. |
-| `borrower_id` | → `User` | Nullable. `on_delete=models.PROTECT`. The requester while `requested`, the borrower while `on_loan`. |
-| `loan_inventory_id` | → `Inventory` | Nullable. `on_delete=models.SET_NULL`. The inventory the borrow request was made through. |
-| `loan_status` | `varchar(9)` | `available`, `requested` or `on_loan`. |
-| `created_at` | `timestamptz` | |
+| Column | Type | Rules | Built in |
+|---|---|---|---|
+| `owner_id` | → `User` | `on_delete=models.PROTECT`. | M7 |
+| `name` | `varchar(64)` | | M7 |
+| `description` | `varchar(512)` | Optional. | M7 |
+| `created_at` | `timestamptz` | | M7 |
+| `borrower_id` | → `User` | Nullable. `on_delete=models.PROTECT`. The requester while `requested`, the borrower while `on_loan`. | M9 |
+| `loan_inventory_id` | → `Inventory` | Nullable. `on_delete=models.SET_NULL`. The inventory the borrow request was made through. | M9 |
+| `loan_status` | `varchar(9)` | `available`, `requested` or `on_loan`. | M9 |
+
+The checks below arrive with the loan columns in M9.
 
 - Check, one of:
   - `available`, with `borrower_id` and `loan_inventory_id` both null.
@@ -195,7 +197,10 @@ These rules span tables, so the database cannot check them alone.
   matches, the request changed in the meantime and the action is rejected.
 - The automatic cancels are conditional updates too: they match `loan_status = 'requested'`
   and the `loan_inventory_id` being left or removed.
-- Deleting an item locks its inventories, then the item row, then re-checks `loan_status`.
+- Deleting an item locks the item row (`select_for_update`), then deletes its listings and
+  the row. Listing an item locks the inventory row, then the item row, so a listing either
+  commits before the delete reads the item's listings or finds the item gone (`400`
+  on `item_id`).
 
 ### Inventories and roles
 
@@ -219,8 +224,9 @@ These rules span tables, so the database cannot check them alone.
 - Only the invited user and the inventory's active admins and owners see a pending
   membership through the invite actions. Anyone else gets `404`, whether the row is
   pending, active or gone.
-- Only active members of an inventory see it and the items listed in it. An item's owner always
-  sees it. A borrower also sees the item they hold.
+- Only active members of an inventory see it and the items listed in it, with each item's
+  name, description and its owner's first and last name. An item's owner always sees it.
+  A borrower also sees the item they hold.
 - A `member` sees only the first and last names of the inventory's admins and owners: not
   the other members, and no phone numbers. Admins and owners see every member with name,
   phone number and role. They see each pending invite of the inventory with the invitee's

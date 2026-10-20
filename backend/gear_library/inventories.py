@@ -6,9 +6,10 @@ non-member everywhere outside the invite actions.
 
 Setting a role and removing a member, which includes leaving, lock the inventory row and
 then re-read the caller's membership and the owners, so an inventory always keeps an
-owner. Deleting locks the inventory row too, then deletes its memberships and the row.
-Each of these locks the inventory before it touches a membership, so on one inventory they
-run one at a time. Renaming and the invite actions take no lock.
+owner. Leaving, being removed and taking the `member` role also delete the user's listings
+in the inventory, under that lock. Deleting locks the inventory row too, then deletes its
+memberships and the row. Each of these locks the inventory before it touches a membership,
+so on one inventory they run one at a time. Renaming and the invite actions take no lock.
 
 Inviting inserts a pending membership; the unique index on (inventory, user) refuses a
 user who is already a member or invited, with `Conflict`. Accepting is one conditional
@@ -31,6 +32,7 @@ from .models import (
     ONE_MEMBERSHIP_PER_USER,
     Connection,
     Inventory,
+    InventoryItem,
     Membership,
     MembershipStatus,
     Role,
@@ -91,7 +93,7 @@ def _lock_inventory(inventory_id):
     return inventory
 
 
-def _lock_as(user_id, inventory_id, role):
+def lock_as(user_id, inventory_id, role):
     """Locks the inventory and returns the caller's membership, which must have `role`."""
     inventory = _lock_inventory(inventory_id)
     membership = Membership.objects.active().filter(inventory=inventory, user_id=user_id).first()
@@ -101,6 +103,13 @@ def _lock_as(user_id, inventory_id, role):
     if not has_role(membership, role):
         raise PermissionDenied(ROLE_REQUIRED[role])
     return membership
+
+
+def _delete_listings(membership):
+    """Deletes the listings of `membership`'s user's items in its inventory."""
+    InventoryItem.objects.filter(
+        inventory_id=membership.inventory_id, item__owner_id=membership.user_id
+    ).delete()
 
 
 def _target_membership(inventory_id, user_id):
@@ -152,12 +161,14 @@ def delete_inventory(actor):
 @transaction.atomic
 def set_role(actor, member_user_id, role):
     """`actor` must be an owner, and is checked again with the inventory locked."""
-    actor = _lock_as(actor.user_id, actor.inventory_id, Role.OWNER)
+    actor = lock_as(actor.user_id, actor.inventory_id, Role.OWNER)
     target = _target_membership(actor.inventory_id, member_user_id)
     if role != Role.OWNER:
         _refuse_losing_last_owner(target)
     if not Membership.objects.active().filter(pk=target.pk).update(role=role):
         raise NotFound(MEMBER_NOT_FOUND)
+    if role == Role.MEMBER:
+        _delete_listings(target)
     target.role = role
     return target
 
@@ -166,9 +177,10 @@ def set_role(actor, member_user_id, role):
 def remove_member(user, inventory_id, member_user_id):
     """Removes a member. Removing yourself is leaving, which any member may do."""
     leaving = member_user_id == user.id
-    actor = _lock_as(user.id, inventory_id, Role.MEMBER if leaving else Role.OWNER)
+    actor = lock_as(user.id, inventory_id, Role.MEMBER if leaving else Role.OWNER)
     target = actor if leaving else _target_membership(inventory_id, member_user_id)
     _refuse_losing_last_owner(target)
+    _delete_listings(target)
     target.delete()
 
 

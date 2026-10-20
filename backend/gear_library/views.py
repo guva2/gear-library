@@ -2,6 +2,7 @@ from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import DatabaseError, IntegrityError, connection, transaction
+from django.db.models import Prefetch
 from django.middleware.csrf import get_token
 from rest_framework import status
 from rest_framework.decorators import (
@@ -9,20 +10,24 @@ from rest_framework.decorators import (
     authentication_classes,
     permission_classes,
 )
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
 
-from . import connections, inventories
+from . import connections, inventories, items
 from .authentication import CsrfSessionAuthentication
-from .models import Connection, ConnectionStatus, Membership, Role
+from .models import Connection, ConnectionStatus, InventoryItem, Item, Membership, Role
 from .serializers import (
     ConnectionSerializer,
     InventoryInviteSerializer,
     InventoryNameSerializer,
     InventorySerializer,
     InviteSerializer,
+    ItemFieldsSerializer,
+    ItemIdSerializer,
+    ItemSerializer,
+    ListedItemSerializer,
     LoginSerializer,
     MemberSerializer,
     MyInviteSerializer,
@@ -129,8 +134,8 @@ def me(request):
     return Response(UserSerializer(request.user).data)
 
 
-def _validated(serializer_class, request):
-    serializer = serializer_class(data=request.data)
+def _validated(serializer_class, request, partial=False):
+    serializer = serializer_class(data=request.data, partial=partial)
     serializer.is_valid(raise_exception=True)
     return serializer.validated_data
 
@@ -304,4 +309,64 @@ def decline_connection(request, connection_id):
 @api_view(["POST"])
 def cancel_connection(request, connection_id):
     connections.cancel(request.user, connection_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _items_of(user):
+    listings = InventoryItem.objects.select_related("inventory").order_by(
+        "inventory__name", "inventory_id"
+    )
+    return (
+        Item.objects.filter(owner=user)
+        .prefetch_related(Prefetch("listings", queryset=listings))
+        .order_by("name", "id")
+    )
+
+
+@api_view(["GET", "POST"])
+def item_list(request):
+    if request.method == "POST":
+        fields = _validated(ItemFieldsSerializer, request)
+        item = items.create_item(request.user, fields)
+        return Response(ItemSerializer(item).data, status=status.HTTP_201_CREATED)
+    return Response(ItemSerializer(_items_of(request.user), many=True).data)
+
+
+def _own_item(user, item_id):
+    item = _items_of(user).filter(pk=item_id).first()
+    if item is None:
+        raise NotFound(items.ITEM_NOT_FOUND)
+    return item
+
+
+@api_view(["PATCH", "DELETE"])
+def item_detail(request, item_id):
+    if request.method == "DELETE":
+        items.delete_item(request.user, item_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    _own_item(request.user, item_id)
+    fields = _validated(ItemFieldsSerializer, request, partial=True)
+    items.update_item(request.user, item_id, fields)
+    return Response(ItemSerializer(_own_item(request.user, item_id)).data)
+
+
+@api_view(["GET", "POST"])
+def inventory_items(request, inventory_id):
+    if request.method == "POST":
+        actor = inventories.get_membership(request.user, inventory_id, Role.ADMIN)
+        item_id = _validated(ItemIdSerializer, request)["item_id"]
+        listing = items.list_item(actor, item_id)
+        return Response(ListedItemSerializer(listing).data, status=status.HTTP_201_CREATED)
+    inventories.get_membership(request.user, inventory_id)
+    listings = (
+        InventoryItem.objects.filter(inventory_id=inventory_id)
+        .select_related("item__owner")
+        .order_by("item__name", "item_id")
+    )
+    return Response(ListedItemSerializer(listings, many=True).data)
+
+
+@api_view(["DELETE"])
+def inventory_item_detail(request, inventory_id, item_id):
+    items.unlist_item(request.user, inventory_id, item_id)
     return Response(status=status.HTTP_204_NO_CONTENT)

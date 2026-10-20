@@ -5,22 +5,36 @@ interface FieldProps {
   name: string;
   label: string;
   errors: FieldErrors;
+  /** Defaults to `name`. Set it when two forms on one page have a field with this name. */
+  id?: string;
   type?: string;
   autoComplete?: string;
+  required?: boolean;
+  defaultValue?: string;
 }
 
-export function Field({ name, label, errors, type = "text", autoComplete }: FieldProps) {
+export function Field({
+  name,
+  label,
+  errors,
+  id = name,
+  type = "text",
+  autoComplete,
+  required = true,
+  defaultValue,
+}: FieldProps) {
   const messages = errors[name];
-  const errorId = `${name}-error`;
+  const errorId = `${id}-error`;
   return (
     <p>
-      <label htmlFor={name}>{label}</label>{" "}
+      <label htmlFor={id}>{label}</label>{" "}
       <input
-        id={name}
+        id={id}
         name={name}
         type={type}
         autoComplete={autoComplete}
-        required
+        defaultValue={defaultValue}
+        required={required}
         aria-invalid={messages ? true : undefined}
         aria-describedby={messages ? errorId : undefined}
       />

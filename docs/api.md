@@ -361,9 +361,36 @@ cancelling an accepted connection is a `409`
 |---|---|---|---|
 | `GET` | `/api/items/` | Logged in. The caller's own items. | |
 | `POST` | `/api/items/` | Logged in. The caller owns the new item. | `400` |
-| `GET` | `/api/items/{id}/` | The item's owner, its borrower, or a member of an inventory it is listed in. | `404` |
-| `PATCH` | `/api/items/{id}/` | The item's owner. | `400`. `403`: can see the item but does not own it. `404`. |
-| `DELETE` | `/api/items/{id}/` | The item's owner. | `403`: can see the item but does not own it. `404`. `409`: on loan. |
+| `PATCH` | `/api/items/{id}/` | The item's owner. | `400`, `404` |
+| `DELETE` | `/api/items/{id}/` | The item's owner. Deletes it and its listings. | `404`. From M9, `409`: on loan. |
+
+Under `/api/items/{id}/`, an item that does not exist and an item the caller does not own
+are both `404` `{"detail": "Item not found."}`, even for a member who sees the item in an
+inventory. `PATCH` checks this before it reads the body.
+
+#### Item
+
+What the `/api/items/` endpoints return. `GET` returns a list sorted by name.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | |
+| `name` | string | 1 to 64 characters. |
+| `description` | string | 0 to 512 characters. `""` when there is none. |
+| `inventories` | list | The inventories the item is listed in, sorted by name. Each has `id` and `name`. |
+
+#### `POST /api/items/` and `PATCH /api/items/{id}/`
+
+| Field | Type | |
+|---|---|---|
+| `name` | string | Required for `POST`. 1 to 64 characters after trimming spaces. |
+| `description` | string | Optional. 0 to 512 characters after trimming spaces. |
+
+`PATCH` changes only the fields it is sent. `POST` returns `201` with the new
+[Item](#item), and `PATCH` returns `200` with the changed [Item](#item). `400` errors are
+keyed by field.
+
+`DELETE` returns `204` with no body.
 
 ### Listings
 
@@ -372,6 +399,49 @@ cancelling an accepted connection is a `409`
 | `GET` | `/api/inventories/{id}/items/` | Member. The items listed in the inventory. | `404` |
 | `POST` | `/api/inventories/{id}/items/` | Admin, for an item they own. | `400`, `403`, `404`, `409`: already listed. |
 | `DELETE` | `/api/inventories/{id}/items/{item_id}/` | Admin, for an item they own. Owner, for any item. | `403`, `404` |
+
+A listing ends when its item's owner leaves the inventory, is removed from it, or takes
+the `member` role there.
+
+#### Listed item
+
+What `GET` and `POST /api/inventories/{id}/items/` return. `GET` returns a list sorted by
+name.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | The item's id. |
+| `name` | string | |
+| `description` | string | `""` when there is none. |
+| `owner` | object | The item's owner: `id`, `first_name` and `last_name`. The owner is always an admin or owner of the inventory. |
+
+#### `POST /api/inventories/{id}/items/`
+
+| Field | Type | |
+|---|---|---|
+| `item_id` | integer | Required. The `id` of one of the caller's items. |
+
+The access check comes before the body: a non-member gets `404` and a `member` gets `403`
+whatever they send.
+
+`201` with the new [Listed item](#listed-item). `400` errors are keyed by `item_id`. Any id
+that is not one of the caller's items gets one message, whether no such item exists or
+someone else owns it:
+
+```json
+{"item_id": ["You can list only your own items."]}
+```
+
+A missing or non-integer `item_id` gets the usual field error.
+
+`409` `{"detail": "This item is already listed in this inventory."}`.
+
+#### `DELETE /api/inventories/{id}/items/{item_id}/`
+
+`204` with no body. The item stays with its owner. An admin removing someone else's item
+gets `403` `{"detail": "Only owners can remove other people's items."}`. An item that is
+not listed in the inventory is a `404`
+`{"detail": "This item is not listed in this inventory."}`.
 
 ## Search (M8)
 
