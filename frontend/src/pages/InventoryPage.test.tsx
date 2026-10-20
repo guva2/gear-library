@@ -213,15 +213,17 @@ describe("as an admin", () => {
     expect(await within(region("Pending invites")).findByRole("alert")).toHaveTextContent(
       "Dee Park was not invited. You can invite only your connections.",
     );
-    expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull());
   });
 
+  const DEE_INVITE = { ...INVITE, id: 42, invitee: { phone_number: "5551230005" } };
+
   it("names the conflicting connection in the section alert after it leaves the picker", async () => {
-    let connections = CONNECTIONS;
+    let invites = [INVITE];
     asRole("admin", {
-      "GET /api/connections/": () => json(200, connections)({}),
+      [`GET ${URL}invites/`]: () => json(200, invites)({}),
       [`POST ${URL}invites/`]: () => {
-        connections = CONNECTIONS.filter(({ user }) => user.id !== 5);
+        invites = [INVITE, DEE_INVITE];
         return json(409, {
           detail: "This user is already a member or has a pending invite.",
         })({});
@@ -235,7 +237,75 @@ describe("as an admin", () => {
     expect(await within(region("Pending invites")).findByRole("alert")).toHaveTextContent(
       "Dee Park was not invited. This user is already a member or has a pending invite.",
     );
-    expect(screen.getByRole("combobox", { name: "Connection" })).toHaveDisplayValue(/Eve Moss/);
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Connection" })).toHaveDisplayValue(/Eve Moss/),
+    );
+  });
+
+  it("does not claim the person was not invited after a server error", async () => {
+    asRole("admin", { [`POST ${URL}invites/`]: json(500, { detail: "Something broke." }) });
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    const alert = await within(region("Pending invites")).findByRole("alert");
+    expect(alert).toHaveTextContent(/^Something broke\.$/);
+  });
+
+  it("does not claim the person was not invited when there was no response, and reloads", async () => {
+    let invites = [INVITE];
+    const backend = asRole("admin", {
+      [`GET ${URL}invites/`]: () => json(200, invites)({}),
+      [`POST ${URL}invites/`]: () => {
+        invites = [INVITE, DEE_INVITE];
+        throw new TypeError("network down");
+      },
+    });
+    await open();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+    const alert = await within(region("Pending invites")).findByRole("alert");
+    expect(alert).toHaveTextContent(/^Could not reach the backend\.$/);
+    await waitFor(() =>
+      expect(within(region("Pending invites")).getAllByRole("listitem")).toHaveLength(2),
+    );
+    expect(backend.requests(`GET ${URL}invites/`)).toHaveLength(2);
+  });
+
+  describe("when the last person leaves the picker", () => {
+    function onlyDee(post: () => Response) {
+      let invites = [INVITE];
+      asRole("admin", {
+        "GET /api/connections/": json(200, CONNECTIONS.slice(0, 3)),
+        [`GET ${URL}invites/`]: () => json(200, invites)({}),
+        [`POST ${URL}invites/`]: () => {
+          invites = [INVITE, DEE_INVITE];
+          return post();
+        },
+      });
+    }
+
+    it("moves focus to the alert when one is shown", async () => {
+      onlyDee(() => json(409, { detail: "Already invited." })({}));
+      await open();
+
+      fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+      const alert = await within(region("Pending invites")).findByRole("alert");
+      await waitFor(() => expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull());
+      expect(alert).toHaveFocus();
+    });
+
+    it("moves focus to the empty-state paragraph otherwise", async () => {
+      onlyDee(() => json(201, DEE_INVITE)({}));
+      await open();
+
+      fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+
+      const empty = await within(region("Pending invites")).findByText(/No connections to invite/);
+      expect(empty).toHaveFocus();
+    });
   });
 
   it("explains a refused invite after losing the admin role in another session", async () => {

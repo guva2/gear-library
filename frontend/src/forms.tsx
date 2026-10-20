@@ -46,7 +46,7 @@ export function FormErrors({ errors }: { errors: FieldErrors }) {
   if (!errors.form) return null;
   if (!submitIds.has(errors)) submitIds.set(errors, ++lastSubmitId);
   return (
-    <p key={submitIds.get(errors)} role="alert">
+    <p key={submitIds.get(errors)} role="alert" tabIndex={-1}>
       {errors.form.join(" ")}
     </p>
   );

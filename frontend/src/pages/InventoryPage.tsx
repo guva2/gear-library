@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth } from "../auth";
@@ -53,7 +53,13 @@ type Send = (
   path: string,
   method: Method,
   options?: { body?: unknown; fields?: readonly string[] },
-) => Promise<FieldErrors | null>;
+) => Promise<Failure | null>;
+
+/** A change that did not succeed. `status` is `null` when there was no response. */
+interface Failure {
+  errors: FieldErrors;
+  status: number | null;
+}
 
 export default function InventoryPage() {
   const { id } = useParams();
@@ -79,7 +85,7 @@ function InventoryView({ base }: { base: string }) {
   const [refusal, setRefusal] = useState<FieldErrors>({});
 
   /**
-   * Sends a change. Returns the errors for the caller to show, or `null` when it succeeded.
+   * Sends a change. Returns the failure for the caller to show, or `null` when it succeeded.
    * A 403 is shown here instead and returns no errors: the caller has lost a role, and the
    * reload can remove the section that sent the change.
    */
@@ -92,23 +98,23 @@ function InventoryView({ base }: { base: string }) {
       const errors = await readErrors(response, fields);
       // The refusal may come from a change someone else made; show the current state.
       reload();
-      if (response.status !== 403) return errors;
+      if (response.status !== 403) return { errors, status: response.status };
       setRefusal(errors);
-      return {};
+      return { errors: {}, status: 403 };
     } catch {
-      return unreachable();
+      return { errors: unreachable(), status: null };
     }
   };
 
   async function act(path: string, method: Method, body?: unknown) {
     const failed = await send(path, method, { body });
-    setErrors(failed ?? {});
+    setErrors(failed?.errors ?? {});
     if (!failed) reload();
   }
 
   async function leaveOrDelete(path: string) {
     const failed = await send(path, "DELETE");
-    if (failed) setErrors(failed);
+    if (failed) setErrors(failed.errors);
     else navigate("/");
   }
 
@@ -285,6 +291,18 @@ interface InvitesProps {
 
 function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  const section = useRef<HTMLElement>(null);
+  const empty = useRef<HTMLParagraphElement>(null);
+  const hadForm = useRef(invitable.length > 0);
+
+  // The form unmounts when the last person leaves the picker; focus would drop to the page.
+  useEffect(() => {
+    const hasForm = invitable.length > 0;
+    if (hadForm.current && !hasForm) {
+      (section.current?.querySelector<HTMLElement>('[role="alert"]') ?? empty.current)?.focus();
+    }
+    hadForm.current = hasForm;
+  }, [invitable.length]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -294,24 +312,27 @@ function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesPr
       body: { user_id: userId },
       fields: ["user_id"],
     });
-    // A refused person leaves the picker on reload, so the message names them and
-    // sits at section level instead of beside whoever the select falls back to.
+    // A 400 or 409 means this person was not invited. They may leave the picker on reload,
+    // so the message names them and sits at section level instead of beside whoever the
+    // select falls back to. After a 5xx or no response the invite may have gone through,
+    // so the message stands alone and a network failure reloads to show the pending list.
     const refused = invitable.find((user) => user.id === userId);
-    const reasons = [...(failed?.user_id ?? []), ...(failed?.form ?? [])];
+    const reasons = [...(failed?.errors.user_id ?? []), ...(failed?.errors.form ?? [])];
+    const notInvited = failed?.status === 400 || failed?.status === 409;
     setErrors(
-      reasons.length > 0
+      notInvited && reasons.length > 0
         ? {
             form: [
               `${refused ? fullName(refused) : "That person"} was not invited. ${reasons.join(" ")}`,
             ],
           }
-        : (failed ?? {}),
+        : (failed?.errors ?? {}),
     );
-    if (!failed) reload();
+    if (!failed || failed.status === null) reload();
   }
 
   return (
-    <section aria-labelledby="invites">
+    <section ref={section} aria-labelledby="invites">
       <h3 id="invites">Pending invites</h3>
       {invites.length === 0 ? (
         <p>No pending invites.</p>
@@ -338,7 +359,7 @@ function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesPr
       )}
       <FormErrors errors={errors} />
       {invitable.length === 0 ? (
-        <p>
+        <p ref={empty} tabIndex={-1}>
           No connections to invite. Find people in{" "}
           <Link to="/connections">My connections</Link>.
         </p>
@@ -381,7 +402,7 @@ function Manage({ name, send, base, reload, onDelete }: ManageProps) {
       body: { name: new FormData(form).get("name") },
       fields: ["name"],
     });
-    setErrors(failed ?? {});
+    setErrors(failed?.errors ?? {});
     if (!failed) {
       form.reset();
       reload();
