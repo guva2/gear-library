@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { FieldErrors } from "./api";
 
 interface FieldProps {
@@ -53,3 +53,27 @@ export function FormErrors({ errors }: { errors: FieldErrors }) {
 }
 
 export const unreachable = (): FieldErrors => ({ form: ["Could not reach the backend."] });
+
+interface ConfirmationProps {
+  message: ReactNode;
+  confirm: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/** Takes focus when it appears, so a screen reader reads the question. */
+export function Confirmation({ message, confirm, onConfirm, onCancel }: ConfirmationProps) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => ref.current?.focus(), []);
+  return (
+    <p ref={ref} tabIndex={-1}>
+      {message}{" "}
+      <button type="button" onClick={onConfirm}>
+        {confirm}
+      </button>{" "}
+      <button type="button" onClick={onCancel}>
+        Cancel
+      </button>
+    </p>
+  );
+}

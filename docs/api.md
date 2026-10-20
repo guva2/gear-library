@@ -257,7 +257,94 @@ accepted invite is a `409` `{"detail": "This is not a pending invite."}`. An inv
 that was declined or revoked, or whose member has left, is a `404`
 `{"detail": "Invite not found."}`.
 
-## Gear (M5)
+## Connections (M5)
+
+| Method | Path | Who | Main errors |
+|---|---|---|---|
+| `GET` | `/api/connections/` | Logged in. The caller's accepted connections. | |
+| `GET` | `/api/connections/requests/` | Logged in. The caller's pending requests, received and sent. | |
+| `POST` | `/api/connections/` | Logged in. Sends a request by phone number, or accepts the other user's pending request. | `400`: invalid number, no such user, or the caller's own number. `409`: already connected, or the caller's request is pending. |
+| `POST` | `/api/connections/{id}/accept/` | The user who received the request. | `403`. `404`: no such connection. |
+| `POST` | `/api/connections/{id}/decline/` | The user who received the request. | `403`. `404`: no such connection. `409`: not a pending request. |
+| `POST` | `/api/connections/{id}/cancel/` | The user who sent the request. | `403`. `404`: no such connection. `409`: not a pending request. |
+| `DELETE` | `/api/connections/{id}/` | Either user of an accepted connection. | `404`: no such connection. `409`: a pending request. |
+
+A request and the connection it becomes are one row with one `id`. Declining, cancelling
+and removing delete it, so its id is then unknown (`404`).
+
+Under `/api/connections/{id}/`, a connection is visible only to its two users. Anyone else
+gets `404`, whether it is pending, accepted or gone. One of the two who may not take the
+action gets `403`, whatever the status: the requester who accepts or declines, or the
+other user who cancels.
+
+### Connection
+
+An accepted connection. `GET /api/connections/` returns a list sorted by the other user's
+last name, then first name.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | |
+| `status` | string | `accepted`. |
+| `user` | object | The other user: `id`, `first_name`, `last_name` and `phone_number` (10 digits). |
+
+### Request
+
+A pending request. A received request shows who sent it, and a sent request shows only the
+number it went to, until it is accepted.
+
+| Field | Type | |
+|---|---|---|
+| `id` | integer | |
+| `status` | string | `pending`. |
+| `user` | object | The other user. Received: `first_name` and `last_name` only. Sent: `phone_number` (10 digits) only, with no name and no `id`. |
+
+`GET /api/connections/requests/` returns both lists, each oldest first:
+
+```json
+{"received": [{"id": 4, "status": "pending", "user": {"first_name": "Sam", "last_name": "Okafor"}}], "sent": [{"id": 5, "status": "pending", "user": {"phone_number": "5551230004"}}]}
+```
+
+### `POST /api/connections/`
+
+| Field | Type | |
+|---|---|---|
+| `phone_number` | string | Required. See [Phone numbers](#phone-numbers). |
+
+`201` with the new [Request](#request), a sent one: its `user` is the phone number only,
+so sending and cancelling a request does not reveal whose number it is. `200` with the [Connection](#connection) when the
+other user's request to the caller was pending: sending accepts it.
+
+`400` errors are keyed by `phone_number`:
+
+```json
+{"phone_number": ["No user has this phone number."]}
+```
+
+```json
+{"phone_number": ["You cannot send a request to yourself."]}
+```
+
+`409` with one of:
+
+- `{"detail": "You are already connected."}`
+- `{"detail": "You have already sent this user a request."}`
+- `{"detail": "This connection changed. Try again."}` when the other user's request was
+  cancelled or declined while this one was sent.
+
+### Answering and removing
+
+The three `POST /api/connections/{id}/` actions take no body. `accept` returns `200` with
+the [Connection](#connection). `decline`, `cancel` and `DELETE` return `204` with no body.
+
+Accepting an accepted connection is a `200` with the [Connection](#connection), the same
+as a first accept. The user who sent a request cannot accept it (`403`). Declining or
+cancelling an accepted connection is a `409`
+`{"detail": "This is not a pending request."}`. Removing a pending request is a `409`
+`{"detail": "You are not connected."}`. A connection that is gone is a `404`
+`{"detail": "Connection not found."}`.
+
+## Gear (M7)
 
 ### Items
 
@@ -277,13 +364,13 @@ that was declined or revoked, or whose member has left, is a `404`
 | `POST` | `/api/inventories/{id}/items/` | Admin, for an item they own. | `400`, `403`, `404`, `409`: already listed. |
 | `DELETE` | `/api/inventories/{id}/items/{item_id}/` | Admin, for an item they own. Owner, for any item. | `403`, `404` |
 
-## Search (M6)
+## Search (M8)
 
 | Method | Path | Who | Main errors |
 |---|---|---|---|
 | `GET` | `/api/search/?q=` | Logged in. Items listed in the caller's inventories. | `400`: no query. |
 
-## Borrowing (M7)
+## Borrowing (M9)
 
 A request is made through one inventory. "Loan inventory" below is that inventory.
 The approve, decline, cancel and return bodies carry what the caller saw, and the `409`

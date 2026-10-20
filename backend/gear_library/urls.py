@@ -26,4 +26,26 @@ urlpatterns = [
     path("invites/<int:invite_id>/accept/", views.accept_invite, name="accept-invite"),
     path("invites/<int:invite_id>/decline/", views.decline_invite, name="decline-invite"),
     path("invites/<int:invite_id>/revoke/", views.revoke_invite, name="revoke-invite"),
+    path("connections/", views.connection_list, name="connection-list"),
+    path("connections/requests/", views.connection_requests, name="connection-requests"),
+    path(
+        "connections/<int:connection_id>/",
+        views.connection_detail,
+        name="connection-detail",
+    ),
+    path(
+        "connections/<int:connection_id>/accept/",
+        views.accept_connection,
+        name="accept-connection",
+    ),
+    path(
+        "connections/<int:connection_id>/decline/",
+        views.decline_connection,
+        name="decline-connection",
+    ),
+    path(
+        "connections/<int:connection_id>/cancel/",
+        views.cancel_connection,
+        name="cancel-connection",
+    ),
 ]

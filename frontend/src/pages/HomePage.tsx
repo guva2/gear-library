@@ -55,6 +55,9 @@ export default function HomePage() {
       <button type="button" onClick={logOut}>
         Log out
       </button>
+      <p>
+        <Link to="/connections">My connections</Link>
+      </p>
       {lists.status === "loading" && <p>Loading…</p>}
       {lists.status === "error" && <p role="alert">Could not load your inventories.</p>}
       {lists.status === "ok" && (

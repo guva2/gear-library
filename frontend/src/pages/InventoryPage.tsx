@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth } from "../auth";
-import { Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
+import { Confirmation, Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
 import {
   fullName,
   getJson,
@@ -250,30 +250,6 @@ function MemberTable({ members, ownerId, onSetRole, onRemove }: MemberTableProps
         />
       )}
     </section>
-  );
-}
-
-interface ConfirmationProps {
-  message: ReactNode;
-  confirm: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-
-/** Takes focus when it appears, so a screen reader reads the question. */
-function Confirmation({ message, confirm, onConfirm, onCancel }: ConfirmationProps) {
-  const ref = useRef<HTMLParagraphElement>(null);
-  useEffect(() => ref.current?.focus(), []);
-  return (
-    <p ref={ref} tabIndex={-1}>
-      {message}{" "}
-      <button type="button" onClick={onConfirm}>
-        {confirm}
-      </button>{" "}
-      <button type="button" onClick={onCancel}>
-        Cancel
-      </button>
-    </p>
   );
 }
 
