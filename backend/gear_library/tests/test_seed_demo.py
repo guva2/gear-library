@@ -93,11 +93,11 @@ def test_leaves_an_existing_user_with_a_demo_number_alone():
 
 
 @pytest.mark.django_db
-def test_creates_two_inventories_using_every_role_and_one_pending_invite():
+def test_creates_three_inventories_using_every_role_and_one_pending_invite():
     seed()
 
     inventories = list(Inventory.objects.all())
-    assert len(inventories) == 2
+    assert len(inventories) == 3
     active = Membership.objects.active()
     assert set(active.values_list("role", flat=True)) == {"member", "admin", "owner"}
     for inventory in inventories:
@@ -128,7 +128,7 @@ def test_leaves_a_changed_demo_inventory_alone():
 
     membership.refresh_from_db()
     assert membership.role == "admin"
-    assert Inventory.objects.count() == 2
+    assert Inventory.objects.count() == 3
     assert not Membership.objects.pending().exists()
 
 
@@ -207,13 +207,14 @@ def test_leaves_a_real_users_connection_to_a_demo_user_alone():
 
 
 @pytest.mark.django_db
-def test_gives_every_demo_user_items_and_lists_some_in_every_inventory():
+def test_gives_every_demo_user_items_and_lists_some_in_every_shared_inventory():
     seed()
 
     for user in User.objects.all():
         assert user.items.exists()
     for inventory in Inventory.objects.all():
-        assert inventory.listings.exists()
+        shared = inventory.memberships.active().count() > 1
+        assert inventory.listings.exists() == shared, inventory.name
     listing_counts = [item.listings.count() for item in Item.objects.all()]
     assert 0 in listing_counts
     assert max(listing_counts) > 1
@@ -317,13 +318,21 @@ def test_every_demo_user_has_a_loan_to_see():
 
 
 @pytest.mark.django_db
-def test_only_sam_has_something_to_discover():
-    """Sam is the only demo user who is a `member` of an inventory. Avery's Camping Crew
-    membership is an invite until Avery accepts it."""
+def test_avery_and_sam_have_something_to_discover_and_jordan_has_nothing():
     seed()
 
     for user in User.objects.all():
         client = APIClient()
         client.force_authenticate(user)
         found = client.get("/api/discover/").json()
-        assert bool(found) == (user.first_name == "Sam"), user.first_name
+        assert bool(found) == (user.first_name != "Jordan"), user.first_name
+
+
+@pytest.mark.django_db
+def test_avery_joined_camping_crew_through_an_invite_from_sam():
+    seed()
+
+    membership = Membership.objects.active().get(
+        inventory__name="Camping Crew", user__first_name="Avery"
+    )
+    assert membership.invited_by.first_name == "Sam"
