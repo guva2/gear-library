@@ -1,5 +1,6 @@
 import type { User } from "./auth";
-import type { PersonName } from "./inventories";
+import { fullName, type PersonName } from "./inventories";
+import { formatPhoneNumber } from "./phone";
 
 export type LoanStatus = "available" | "requested" | "on_loan";
 
@@ -54,4 +55,13 @@ export interface BorrowedItem {
 /** The name, then the description when there is one. */
 export function describeItem(item: { name: string; description: string }): string {
   return item.description ? `${item.name}: ${item.description}` : item.name;
+}
+
+/** "Requested by" or "On loan to", then `borrower` by name and phone number, or "you". */
+export function borrowerText(loanStatus: LoanStatus, borrower: User | "you"): string {
+  const who =
+    borrower === "you"
+      ? borrower
+      : `${fullName(borrower)}, ${formatPhoneNumber(borrower.phone_number)}`;
+  return loanStatus === "requested" ? `Requested by ${who}` : `On loan to ${who}`;
 }

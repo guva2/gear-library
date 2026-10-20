@@ -16,7 +16,13 @@ import {
   type PersonName,
   type Role,
 } from "../inventories";
-import { describeItem, LOAN_STATUS_LABELS, type Item, type ListedItem } from "../items";
+import {
+  borrowerText,
+  describeItem,
+  LOAN_STATUS_LABELS,
+  type Item,
+  type ListedItem,
+} from "../items";
 import { useLoad } from "../load";
 import { formatPhoneNumber } from "../phone";
 
@@ -374,12 +380,9 @@ function listable(myItems: Item[], listed: ListedItem[]): Item[] {
 
 /** The loan status, with who has requested or borrowed the item when the caller may see it. */
 function loanText(item: ListedItem): string {
-  const who = item.borrowed_by_me
-    ? "you"
-    : item.borrower &&
-      `${fullName(item.borrower)}, ${formatPhoneNumber(item.borrower.phone_number)}`;
-  if (!who) return LOAN_STATUS_LABELS[item.loan_status];
-  return item.loan_status === "requested" ? `Requested by ${who}` : `On loan to ${who}`;
+  const borrower = item.borrowed_by_me ? "you" : item.borrower;
+  if (!borrower) return LOAN_STATUS_LABELS[item.loan_status];
+  return borrowerText(item.loan_status, borrower);
 }
 
 interface LoanButtonsProps {

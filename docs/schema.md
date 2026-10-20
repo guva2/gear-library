@@ -204,13 +204,13 @@ These rules span tables, so the database cannot check them alone.
   one gets `409`.
 - The automatic cancels are conditional updates too: they match `loan_status = 'requested'`
   and the `loan_inventory_id` being left or removed. Each runs under that inventory's lock.
-- Deleting an item reads the inventories it is listed in and its loan inventory, locks
-  them (`select_for_update`) in ascending `id` order, then locks the item row. It then
-  re-reads the item's listings. A listing added in between is in an inventory it has not
-  locked, and taking that lock after the item row would reverse the lock order, so the
-  delete rolls back and starts again. An item `on_loan` gets `409`. Otherwise the delete
-  removes the listings and the row. A listing that waits on the delete's item lock finds
-  the item gone (`400` on `item_id`).
+- Deleting an item reads the inventories it is listed in, locks them (`select_for_update`)
+  in ascending `id` order, then locks the item row. It then re-reads the item's listings.
+  A listing added in between is in an inventory it has not locked, and taking that lock
+  after the item row would reverse the lock order, so the delete rolls back and starts
+  again. An item `on_loan` gets `409`. Otherwise the delete removes the listings and the
+  row. A listing that waits on the delete's item lock finds the item gone (`400` on
+  `item_id`).
 
 ### Inventories and roles
 
@@ -264,7 +264,8 @@ These rules span tables, so the database cannot check them alone.
 - An admin removes only their own items. An owner removes any item.
 - A listing is removed when its item's owner leaves, is removed, or takes the `member`
   role in that inventory.
-- Removing a listing does not change a loan. The borrower and loan status are on the item.
+- Removing a listing does not end a loan. It cancels a pending request made through that
+  inventory.
 
 ### Borrowing
 

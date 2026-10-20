@@ -3,9 +3,8 @@ import { Link } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { Confirmation, Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
 import { fullName, getJson } from "../inventories";
-import { describeItem, type BorrowedItem, type Item } from "../items";
+import { borrowerText, describeItem, type BorrowedItem, type Item } from "../items";
 import { useLoad } from "../load";
-import { formatPhoneNumber } from "../phone";
 
 const FIELDS = ["name", "description"] as const;
 
@@ -21,8 +20,7 @@ function listedIn(item: Item): string {
 
 function loanState(item: Item): string {
   if (!item.borrower) return "Available.";
-  const who = `${fullName(item.borrower)}, ${formatPhoneNumber(item.borrower.phone_number)}`;
-  const state = item.loan_status === "requested" ? `Requested by ${who}` : `On loan to ${who}`;
+  const state = borrowerText(item.loan_status, item.borrower);
   return item.loan_inventory ? `${state}, through ${item.loan_inventory.name}.` : `${state}.`;
 }
 

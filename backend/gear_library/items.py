@@ -8,11 +8,11 @@ re-reads the caller's membership, so they run one at a time with every other cha
 takes that lock. Listing then locks the item row, and removing a listing cancels a pending
 request made through the inventory. Inventory rows are locked before item rows.
 
-Deleting locks the inventories the item is listed in and its loan inventory, in ascending
-`id` order, then the item row. It re-reads the listings under those locks: a listing added
-after the first read is in an inventory not locked yet, and locking it while holding the
-item row would invert the order, so the delete starts again. An item on loan is not
-deleted (`Conflict`). Django's cascade deletes the listings and the row.
+Deleting locks the inventories the item is listed in, in ascending `id` order, then the
+item row. It re-reads the listings under those locks: a listing added after the first read
+is in an inventory not locked yet, and locking it while holding the item row would invert
+the order, so the delete starts again. An item on loan is not deleted (`Conflict`).
+Django's cascade deletes the listings and the row.
 
 An item that is not the caller's is a `ValidationError` on `item_id` with one message,
 whether it is missing or someone else's, so the caller learns nothing about other users'
@@ -52,7 +52,7 @@ class _ListedMeanwhile(Exception):
 
 def _inventories_of(item):
     listed = InventoryItem.objects.filter(item_id=item.pk).values_list("inventory_id", flat=True)
-    return set(listed) | {item.loan_inventory_id} - {None}
+    return set(listed)
 
 
 @transaction.atomic
@@ -98,7 +98,8 @@ def add_listing(actor, item_id):
         raise
 
 
-def _listing(inventory_id, item_id):
+def get_listing(inventory_id, item_id):
+    """The listing of the item `item_id` in the inventory, with its item."""
     listing = (
         InventoryItem.objects.select_related("item")
         .filter(inventory_id=inventory_id, item_id=item_id)
@@ -114,7 +115,7 @@ def remove_listing(user, inventory_id, item_id):
     """Removes the item `item_id` from the inventory. An owner removes any item, and an
     admin only their own."""
     actor = lock_as(user.id, inventory_id, Role.ADMIN)
-    listing = _listing(inventory_id, item_id)
+    listing = get_listing(inventory_id, item_id)
     if actor.role != Role.OWNER and listing.item.owner_id != user.id:
         raise PermissionDenied(OWN_ITEMS_ONLY)
     listing.delete()

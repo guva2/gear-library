@@ -18,8 +18,8 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 
 from .errors import Conflict
 from .inventories import lock_as
-from .items import ITEM_NOT_FOUND, LISTING_NOT_FOUND
-from .models import InventoryItem, Item, LoanStatus, Role
+from .items import ITEM_NOT_FOUND, get_listing
+from .models import Item, LoanStatus, Role
 
 OWN_ITEM = "You cannot borrow your own item."
 NOT_AVAILABLE = "This item has already been requested or is on loan."
@@ -34,14 +34,7 @@ def _listed_item(user_id, inventory_id, item_id, role):
     """Locks the inventory, checks the caller's `role` there and returns the item listed
     there."""
     lock_as(user_id, inventory_id, role)
-    listing = (
-        InventoryItem.objects.select_related("item")
-        .filter(inventory_id=inventory_id, item_id=item_id)
-        .first()
-    )
-    if listing is None:
-        raise NotFound(LISTING_NOT_FOUND)
-    return listing.item
+    return get_listing(inventory_id, item_id).item
 
 
 @transaction.atomic
