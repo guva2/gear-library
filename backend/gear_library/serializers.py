@@ -244,17 +244,10 @@ class BorrowedItemSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class ListedInWithRoleSerializer(ListedInSerializer):
-    """An inventory an item is listed in, with the caller's role there. Each listing needs
-    its `role` annotation."""
-
-    role = serializers.CharField(read_only=True)
-
-
 class DiscoverItemSerializer(serializers.ModelSerializer):
-    """An item someone else owns, listed in the caller's inventories. Pass the caller as
-    `context["user"]`, and the item's listings in the caller's inventories, with the
-    caller's `role` in each, as its `visible_listings`.
+    """An item the caller can only borrow. Pass the caller as `context["user"]`, and the
+    item's listings in the inventories where the caller is a `member` as its
+    `visible_listings`.
 
     It shows the loan status alone, and whether the item is requested by or lent to the
     caller; never who the requester or borrower is.
@@ -262,9 +255,7 @@ class DiscoverItemSerializer(serializers.ModelSerializer):
 
     owner = PersonNameSerializer(read_only=True)
     borrowed_by_me = serializers.SerializerMethodField()
-    inventories = ListedInWithRoleSerializer(
-        source="visible_listings", many=True, read_only=True
-    )
+    inventories = ListedInSerializer(source="visible_listings", many=True, read_only=True)
 
     class Meta:
         model = Item

@@ -44,11 +44,6 @@ def ref(inventory):
     return {"id": inventory.id, "name": inventory.name}
 
 
-def ref_as(inventory, role):
-    """An inventory in a Discover item, with the caller's role there."""
-    return {**ref(inventory), "role": role}
-
-
 def query_count(user, url):
     client = client_for(user)
     with CaptureQueriesContext(connection) as captured:
@@ -66,10 +61,9 @@ def test_anonymous_callers_are_refused(url):
 class TestDiscover:
     url = "/api/discover/"
 
-    def test_an_item_listed_in_two_of_the_callers_inventories_appears_once(self, people):
+    def test_an_item_listed_only_where_the_caller_is_a_member_appears(self, people):
         rope = Item.objects.create(owner=people["adam"], name="Rope", description="60 m")
         list_in(people["climbing"], rope)
-        list_in(people["camping"], rope)
 
         assert get(people["mia"], self.url) == [
             {
@@ -79,27 +73,53 @@ class TestDiscover:
                 "owner": name_of(people["adam"]),
                 "loan_status": "available",
                 "borrowed_by_me": False,
-                "inventories": [
-                    ref_as(people["camping"], "admin"),
-                    ref_as(people["climbing"], "member"),
-                ],
+                "inventories": [ref(people["climbing"])],
             }
         ]
+
+    def test_an_item_in_two_member_inventories_appears_once_with_both(self, people):
+        boating = make_inventory(
+            "Boating", [(people["olive"], "owner"), (people["mia"], "member")]
+        )
+        rope = Item.objects.create(owner=people["olive"], name="Rope")
+        list_in(people["climbing"], rope)
+        list_in(boating, rope)
+
+        (seen,) = get(people["mia"], self.url)
+
+        assert seen["inventories"] == [ref(boating), ref(people["climbing"])]
+
+    def test_lists_only_the_callers_inventories(self, people):
+        rope = Item.objects.create(owner=people["olive"], name="Rope")
+        list_in(people["climbing"], rope)
+        list_in(people["hiking"], rope)
+
+        (seen,) = get(people["mia"], self.url)
+
+        assert seen["inventories"] == [ref(people["climbing"])]
+
+    def test_leaves_out_an_item_listed_only_where_the_caller_is_an_admin(self, people):
+        list_in(people["camping"], Item.objects.create(owner=people["adam"], name="Stove"))
+
+        assert get(people["mia"], self.url) == []
+
+    def test_leaves_out_an_item_also_listed_where_the_caller_is_an_admin(self, people):
+        rope = Item.objects.create(owner=people["adam"], name="Rope")
+        list_in(people["climbing"], rope)
+        list_in(people["camping"], rope)
+
+        assert get(people["mia"], self.url) == []
+
+    def test_leaves_out_an_item_listed_only_where_the_caller_is_an_owner(self, people):
+        list_in(people["climbing"], Item.objects.create(owner=people["adam"], name="Rope"))
+
+        assert get(people["olive"], self.url) == []
 
     def test_leaves_out_the_callers_own_items_and_unlisted_items(self, people):
         list_in(people["climbing"], Item.objects.create(owner=people["mia"], name="Mine"))
         Item.objects.create(owner=people["adam"], name="Unlisted")
 
         assert get(people["mia"], self.url) == []
-
-    def test_lists_only_the_inventories_where_the_caller_is_an_active_member(self, people):
-        rope = Item.objects.create(owner=people["adam"], name="Rope")
-        list_in(people["climbing"], rope)
-        list_in(people["camping"], rope)
-
-        (seen,) = get(people["olive"], self.url)
-
-        assert seen["inventories"] == [ref_as(people["climbing"], "owner")]
 
     def test_an_invite_shows_nothing(self, people):
         list_in(people["climbing"], Item.objects.create(owner=people["adam"], name="Rope"))
@@ -124,16 +144,21 @@ class TestDiscover:
         ]
 
     def test_the_number_of_queries_does_not_grow_with_the_items(self, people):
+        boating = make_inventory(
+            "Boating", [(people["olive"], "owner"), (people["mia"], "member")]
+        )
+
         def add_item(name):
             item = Item.objects.create(owner=people["adam"], name=name)
             list_in(people["climbing"], item)
-            list_in(people["camping"], item)
+            list_in(boating, item)
 
         add_item("Rope")
         one = query_count(people["mia"], self.url)
         for name in ["Axe", "Bivy", "Cord"]:
             add_item(name)
 
+        assert len(get(people["mia"], self.url)) == 4
         assert query_count(people["mia"], self.url) == one
 
 

@@ -306,12 +306,24 @@ def test_lends_a_new_demo_item_only_while_the_borrower_is_a_member_where_it_is_l
 
 
 @pytest.mark.django_db
-def test_every_demo_user_has_something_to_discover_and_a_loan_to_see():
+def test_every_demo_user_has_a_loan_to_see():
     seed()
 
     for user in User.objects.all():
         client = APIClient()
         client.force_authenticate(user)
         loans = client.get("/api/lending/").json() + client.get("/api/borrowing/").json()
-        assert client.get("/api/discover/").json(), user.first_name
         assert loans, user.first_name
+
+
+@pytest.mark.django_db
+def test_only_sam_has_something_to_discover():
+    """Sam is the only demo user who is a `member` of an inventory. Avery's Camping Crew
+    membership is an invite until Avery accepts it."""
+    seed()
+
+    for user in User.objects.all():
+        client = APIClient()
+        client.force_authenticate(user)
+        found = client.get("/api/discover/").json()
+        assert bool(found) == (user.first_name == "Sam"), user.first_name

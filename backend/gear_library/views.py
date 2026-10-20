@@ -14,7 +14,6 @@ from django.db.models import (
     OuterRef,
     Prefetch,
     Q,
-    Subquery,
     Value,
     When,
 )
@@ -583,31 +582,35 @@ def _listed_where_lent():
     return InventoryItem.objects.filter(item=OuterRef("pk"), inventory=OuterRef("loan_inventory"))
 
 
-def _visible_listings(user, with_role=False):
+def _visible_listings(user, roles=None):
     """A prefetch of each item's listings in `user`'s inventories, as `visible_listings`,
-    sorted by inventory name. `with_role` adds `user`'s role in each inventory as `role`."""
+    sorted by inventory name. `roles` limits it to the inventories where `user` has one of
+    them."""
     listings = (
-        InventoryItem.objects.filter(inventory_id__in=_inventory_ids(user))
+        InventoryItem.objects.filter(inventory_id__in=_inventory_ids(user, roles))
         .select_related("inventory")
         .order_by("inventory__name", "inventory_id")
     )
-    if with_role:
-        own = Membership.objects.active().filter(user=user, inventory=OuterRef("inventory"))
-        listings = listings.annotate(role=Subquery(own.values("role")))
     return Prefetch("listings", queryset=listings, to_attr="visible_listings")
 
 
 class DiscoverViewSet(ApiViewSet):
-    """The items listed in the caller's inventories that someone else owns."""
+    """The items the caller can only borrow: listed in an inventory where the caller is a
+    `member`, and in none where they are an admin or owner."""
 
     def list(self, request):
         user = request.user
-        listed = InventoryItem.objects.filter(inventory_id__in=_inventory_ids(user))
+
+        def listed_where(roles):
+            listings = InventoryItem.objects.filter(inventory_id__in=_inventory_ids(user, roles))
+            return listings.values("item_id")
+
         found = (
-            Item.objects.filter(pk__in=listed.values("item_id"))
+            Item.objects.filter(pk__in=listed_where([Role.MEMBER]))
+            .exclude(pk__in=listed_where([Role.ADMIN, Role.OWNER]))
             .exclude(owner=user)
             .select_related("owner")
-            .prefetch_related(_visible_listings(user, with_role=True))
+            .prefetch_related(_visible_listings(user, [Role.MEMBER]))
             .order_by(
                 Case(When(loan_status=LoanStatus.AVAILABLE, then=Value(0)), default=Value(1)),
                 "name",

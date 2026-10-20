@@ -555,7 +555,7 @@ No body. Cancels the caller's pending request.
 
 | Method | Path | Who | Main errors |
 |---|---|---|---|
-| `GET` | `/api/discover/` | Logged in. Items listed in the caller's inventories that someone else owns. | |
+| `GET` | `/api/discover/` | Logged in. Items the caller can only borrow. | |
 | `GET` | `/api/lending/` | Logged in. Requests and loans the caller may answer or close. | |
 
 Both count only the inventories where the caller is an active member: a pending invite
@@ -563,10 +563,10 @@ adds nothing.
 
 ### Discover item
 
-What `GET /api/discover/` returns: every item listed in at least one of the caller's
-inventories, apart from the caller's own items, once per item however many of those
-inventories list it. Available items come first, then the rest; each group is sorted by
-name.
+What `GET /api/discover/` returns: every item listed in at least one inventory where the
+caller is a `member`, and in none where the caller is an admin or owner, apart from the
+caller's own items. Each item appears once however many of those inventories list it.
+Available items come first, then the rest; each group is sorted by name.
 
 | Field | Type | |
 |---|---|---|
@@ -576,7 +576,7 @@ name.
 | `owner` | object | `first_name` and `last_name` only. |
 | `loan_status` | string | `available`, `requested` or `on_loan`. |
 | `borrowed_by_me` | boolean | `true` when the caller is the requester or the borrower. |
-| `inventories` | list | The caller's inventories the item is listed in, sorted by name. Each has `id`, `name` and `role`, the caller's role there. Borrow the item through one of them. |
+| `inventories` | list | The inventories where the caller is a `member` and the item is listed, sorted by name. Each has `id` and `name`. Borrow the item through one of them. |
 
 As for a `member` in a [Listed item](#listed-item), the requester or borrower is never
 shown.

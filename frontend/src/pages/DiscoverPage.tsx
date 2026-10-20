@@ -1,83 +1,57 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useAuth } from "../auth";
 import { FormErrors, useChange } from "../forms";
-import { fullName, getJson, hasRole } from "../inventories";
-import {
-  borrowerText,
-  LOAN_STATUS_LABELS,
-  type BorrowedItem,
-  type DiscoverItem,
-} from "../items";
+import { fullName, getJson } from "../inventories";
+import { borrowerText, LOAN_STATUS_LABELS, type DiscoverItem } from "../items";
 import { useLoad } from "../load";
 
-interface PageData {
-  items: DiscoverItem[];
-  /** By item id, the return path of each item the signed-in user holds and may mark returned. */
-  returnPaths: Map<number, string>;
+function loadItems(signal: AbortSignal): Promise<DiscoverItem[]> {
+  return getJson<DiscoverItem[]>("/api/discover/", signal);
 }
 
-async function loadPage(signal: AbortSignal): Promise<PageData> {
-  const [items, borrowed] = await Promise.all([
-    getJson<DiscoverItem[]>("/api/discover/", signal),
-    getJson<BorrowedItem[]>("/api/borrowing/", signal),
-  ]);
-  const returnPaths = new Map<number, string>();
-  for (const item of borrowed) {
-    if (item.loan_status === "on_loan" && item.can_return && item.loan_inventory) {
-      const path = `/api/inventories/${item.loan_inventory.id}/items/${item.id}/return/`;
-      returnPaths.set(item.id, path);
-    }
-  }
-  return { items, returnPaths };
-}
-
-function statusText(item: DiscoverItem, inUse: boolean): string {
-  if (!item.borrowed_by_me) return LOAN_STATUS_LABELS[item.loan_status];
-  if (inUse) return "In use by you";
-  return borrowerText(item.loan_status, "you");
-}
-
-/** The items in the signed-in user's inventories that someone else owns. */
+/** The items the signed-in user can only borrow. */
 export default function DiscoverPage() {
-  const { user } = useAuth();
-  const [page, reload] = useLoad(loadPage);
+  const [items, reload] = useLoad(loadItems);
   const { errors, change } = useChange(reload);
   // The item whose control was used last: only its card takes focus when it changes.
   const [actedOn, setActedOn] = useState<number | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+
+  // The acted-on card unmounts when the reload drops its item, and focus would fall to the
+  // page body.
+  useEffect(() => {
+    if (actedOn !== null && items.status === "ok" && !items.data.some((i) => i.id === actedOn)) {
+      heading.current?.focus();
+      setActedOn(null);
+    }
+  }, [items, actedOn]);
 
   return (
     <>
-      <h2>Discover</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        Discover
+      </h2>
       <FormErrors errors={errors} />
-      {page.status === "loading" && <p>Loading…</p>}
-      {page.status === "error" && <p role="alert">Could not load the items.</p>}
-      {page.status === "ok" &&
-        (page.data.items.length === 0 ? (
-          <p>Nothing to discover yet. Items others list in your inventories show up here.</p>
+      {items.status === "loading" && <p>Loading…</p>}
+      {items.status === "error" && <p role="alert">Could not load the items.</p>}
+      {items.status === "ok" &&
+        (items.data.length === 0 ? (
+          <p>
+            Nothing to borrow right now. Items others list in inventories where you are a member
+            show up here.
+          </p>
         ) : (
           <ul className="cards">
-            {page.data.items.map((item) => {
-              const returnPath = page.data.returnPaths.get(item.id);
-              return (
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  actedOn={actedOn === item.id}
-                  onRequest={(inventoryId) => {
-                    setActedOn(item.id);
-                    change(`/api/inventories/${inventoryId}/items/${item.id}/borrow/`, "POST");
-                  }}
-                  onMarkAvailable={
-                    returnPath && user
-                      ? () => {
-                          setActedOn(item.id);
-                          change(returnPath, "POST", { borrower_id: user.id });
-                        }
-                      : undefined
-                  }
-                />
-              );
-            })}
+            {items.data.map((item) => (
+              <ItemCard
+                key={item.id}
+                item={item}
+                actedOn={actedOn === item.id}
+                onRequest={(inventoryId) => {
+                  setActedOn(item.id);
+                  change(`/api/inventories/${inventoryId}/items/${item.id}/borrow/`, "POST");
+                }}
+              />
+            ))}
           </ul>
         ))}
     </>
@@ -90,17 +64,12 @@ interface ItemCardProps {
   actedOn: boolean;
   /** Called with the inventory to borrow the item through. */
   onRequest: (inventoryId: number) => void;
-  /** Set while the signed-in user holds the item and may mark it available. */
-  onMarkAvailable?: () => void;
 }
 
-function ItemCard({ item, actedOn, onRequest, onMarkAvailable }: ItemCardProps) {
+function ItemCard({ item, actedOn, onRequest }: ItemCardProps) {
   const available = item.loan_status === "available";
   const heading = useRef<HTMLHeadingElement>(null);
   const wasAvailable = useRef(available);
-  // The inventories where the user is an admin or owner. Through any of them they take the
-  // item for their own use without a request, whatever their role in the others.
-  const usableThrough = item.inventories.filter((inventory) => hasRole(inventory.role, "admin"));
 
   // The card's controls unmount when the item changes between available and not; focus
   // would drop to the page. Only the card the user acted on takes it.
@@ -117,72 +86,30 @@ function ItemCard({ item, actedOn, onRequest, onMarkAvailable }: ItemCardProps) 
       {item.description && <p>{item.description}</p>}
       <p className="meta">Owned by {fullName(item.owner)}</p>
       <p className="meta">In {item.inventories.map((inventory) => inventory.name).join(", ")}</p>
-      <p className="status">{statusText(item, onMarkAvailable !== undefined)}</p>
-      {available && (
-        <BorrowButton
-          item={item}
-          inventories={usableThrough.length > 0 ? usableThrough : item.inventories}
-          wording={usableThrough.length > 0 ? MARK_UNAVAILABLE : REQUEST}
-          onRequest={onRequest}
-        />
-      )}
-      {onMarkAvailable && (
-        <p>
-          <button
-            type="button"
-            aria-label={`Done using it: ${item.name}`}
-            onClick={onMarkAvailable}
-          >
-            Done using it
-          </button>
-        </p>
-      )}
+      <p className="status">
+        {item.borrowed_by_me
+          ? borrowerText(item.loan_status, "you")
+          : LOAN_STATUS_LABELS[item.loan_status]}
+      </p>
+      {available && <BorrowButton item={item} onRequest={onRequest} />}
     </li>
   );
 }
 
-interface BorrowWording {
-  button: string;
-  /** The button's accessible name, given the item's name. */
-  label: (itemName: string) => string;
-  choose: string;
-  submit: string;
-  idPrefix: string;
-}
-
-const REQUEST: BorrowWording = {
-  button: "Ask to borrow",
-  label: (itemName) => `Ask to borrow ${itemName}`,
-  choose: "Borrow through",
-  submit: "Send request",
-  idPrefix: "borrow-through",
-};
-
-const MARK_UNAVAILABLE: BorrowWording = {
-  button: "Use it myself",
-  label: (itemName) => `Use it myself: ${itemName}`,
-  choose: "Use through",
-  submit: "Use it myself",
-  idPrefix: "use-through",
-};
-
-interface BorrowButtonProps extends Pick<ItemCardProps, "item" | "onRequest"> {
-  /** The inventories offered to borrow through, in order; never empty. */
-  inventories: DiscoverItem["inventories"];
-  wording: BorrowWording;
-}
+type BorrowButtonProps = Pick<ItemCardProps, "item" | "onRequest">;
 
 /**
  * Borrows the item. With several inventories to borrow through it first asks which one,
  * with the first preselected.
  */
-function BorrowButton({ item, inventories, wording, onRequest }: BorrowButtonProps) {
+function BorrowButton({ item, onRequest }: BorrowButtonProps) {
+  const { inventories } = item;
   const [choosing, setChoosing] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const select = useRef<HTMLSelectElement>(null);
   // Set when the choice closes: the closed form held focus.
   const refocus = useRef(false);
-  const selectId = `${wording.idPrefix}-${item.id}`;
+  const selectId = `borrow-through-${item.id}`;
 
   useEffect(() => {
     if (choosing) select.current?.focus();
@@ -207,8 +134,13 @@ function BorrowButton({ item, inventories, wording, onRequest }: BorrowButtonPro
   if (!choosing) {
     return (
       <p>
-        <button ref={button} type="button" aria-label={wording.label(item.name)} onClick={start}>
-          {wording.button}
+        <button
+          ref={button}
+          type="button"
+          aria-label={`Ask to borrow ${item.name}`}
+          onClick={start}
+        >
+          Ask to borrow
         </button>
       </p>
     );
@@ -216,7 +148,7 @@ function BorrowButton({ item, inventories, wording, onRequest }: BorrowButtonPro
   return (
     <form onSubmit={submit}>
       <p>
-        <label htmlFor={selectId}>{wording.choose}</label>{" "}
+        <label htmlFor={selectId}>Borrow through</label>{" "}
         <select ref={select} id={selectId} name="inventory">
           {inventories.map((inventory) => (
             <option key={inventory.id} value={inventory.id}>
@@ -226,7 +158,7 @@ function BorrowButton({ item, inventories, wording, onRequest }: BorrowButtonPro
         </select>
       </p>
       <p>
-        <button type="submit">{wording.submit}</button>{" "}
+        <button type="submit">Send request</button>{" "}
         <button
           type="button"
           onClick={() => {
