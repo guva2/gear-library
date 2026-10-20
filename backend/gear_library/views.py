@@ -409,7 +409,8 @@ class InviteViewSet(ApiViewSet):
 
 
 def _connection_data(connection, user):
-    """A connection in the shape its status lets the caller see: accepted in full, otherwise as a sent request."""
+    """A connection in the shape its status lets the caller see: accepted in full,
+    otherwise as a sent request."""
     if connection.status == ConnectionStatus.ACCEPTED:
         return ConnectionSerializer(connection, context={"user": user}).data
     return SentRequestSerializer(connection, context={"user": user}).data

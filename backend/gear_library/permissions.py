@@ -5,7 +5,7 @@ from rest_framework.exceptions import NotFound
 from rest_framework.permissions import BasePermission
 
 from . import connections, inventories, items
-from .models import Membership, MembershipStatus, Role
+from .models import Membership, Role
 
 
 class IsAnonymous(BasePermission):
@@ -61,18 +61,17 @@ class IsInvitee(BasePermission):
 
 
 class IsInviteInventoryAdmin(BasePermission):
-    """The caller is an active admin or owner of the invite's inventory. Needs the invite
-    from `InviteViewSet.get_queryset`, which holds another user's membership only for such
-    a caller."""
+    """The caller is an active admin or owner of the invite's inventory."""
 
     message = ANSWER_INVITE
 
     def has_object_permission(self, request, view, invite):
-        if invite.user_id != request.user.id:
-            return True
-        return invite.status == MembershipStatus.ACTIVE and inventories.has_role(
-            invite, Role.ADMIN
+        own = (
+            Membership.objects.active()
+            .filter(inventory_id=invite.inventory_id, user=request.user)
+            .first()
         )
+        return own is not None and inventories.has_role(own, Role.ADMIN)
 
 
 class ReceivedRequest(BasePermission):
