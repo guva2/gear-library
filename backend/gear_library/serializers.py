@@ -165,20 +165,13 @@ class ItemSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class ItemOwnerSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ["id", "first_name", "last_name"]
-        read_only_fields = fields
-
-
 class ListedItemSerializer(serializers.ModelSerializer):
     """A listed item as the inventory's members see it. `id` is the item's id."""
 
     id = serializers.IntegerField(source="item.id", read_only=True)
     name = serializers.CharField(source="item.name", read_only=True)
     description = serializers.CharField(source="item.description", read_only=True)
-    owner = ItemOwnerSerializer(source="item.owner", read_only=True)
+    owner = PersonNameSerializer(source="item.owner", read_only=True)
 
     class Meta:
         model = InventoryItem

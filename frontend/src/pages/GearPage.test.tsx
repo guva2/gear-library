@@ -100,6 +100,36 @@ describe("my gear", () => {
   });
 });
 
+describe("page-level errors", () => {
+  it("are cleared when an add or an edit starts", async () => {
+    liveBackend((state) => ({
+      "DELETE /api/items/20/": json(404, { detail: "Item not found." }),
+      "POST /api/items/": () => {
+        state.items = [AXE, ROPE, { id: 22, name: "Tent", description: "", inventories: [] }];
+        return json(201, state.items[2])({});
+      },
+      "PATCH /api/items/21/": json(200, AXE),
+    }));
+    await open();
+    const failDelete = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delete Rope" }));
+      fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Item not found.");
+    };
+
+    await failDelete();
+    const add = region("Add an item");
+    fill(add, "Name", "Tent");
+    fireEvent.click(within(add).getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+
+    await failDelete();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Axe" }));
+    fireEvent.click(within(itemFor("Axe")).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
 describe("adding an item", () => {
   it("creates the item, clears the form and reloads the list", async () => {
     const TENT = { id: 22, name: "Tent", description: "", inventories: [] };

@@ -233,19 +233,18 @@ class TestInventoryItems:
         response = client_for(people[who]).get(listings_url(people["inventory"]))
 
         assert response.status_code == 200
-        admin, owner = people["admin"], people["owner"]
         assert response.json() == [
             {
                 "id": rope.id,
                 "name": "Rope",
                 "description": "60 m",
-                "owner": {"id": admin.id, "first_name": "Adam", "last_name": "L2"},
+                "owner": {"first_name": "Adam", "last_name": "L2"},
             },
             {
                 "id": tent.id,
                 "name": "Tent",
                 "description": "",
-                "owner": {"id": owner.id, "first_name": "Olive", "last_name": "L1"},
+                "owner": {"first_name": "Olive", "last_name": "L1"},
             },
         ]
 
@@ -267,7 +266,7 @@ class TestInventoryItems:
             "id": rope.id,
             "name": "Rope",
             "description": "60 m",
-            "owner": {"id": people["admin"].id, "first_name": "Adam", "last_name": "L2"},
+            "owner": {"first_name": "Adam", "last_name": "L2"},
         }
         assert listed(people["inventory"]) == {rope.id}
 

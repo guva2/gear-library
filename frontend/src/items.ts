@@ -14,7 +14,7 @@ export interface ListedItem {
   id: number;
   name: string;
   description: string;
-  owner: PersonName & { id: number };
+  owner: PersonName;
 }
 
 /** The name, then the description when there is one. */

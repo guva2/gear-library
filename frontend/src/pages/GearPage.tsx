@@ -46,6 +46,7 @@ export default function GearPage() {
         <ItemList
           items={page.data}
           reload={reload}
+          onSubmit={() => setErrors({})}
           onGone={(errors) => {
             setErrors(errors);
             reload();
@@ -53,7 +54,7 @@ export default function GearPage() {
           onDelete={remove}
         />
       )}
-      <AddItem reload={reload} />
+      <AddItem reload={reload} onSubmit={() => setErrors({})} />
     </>
   );
 }
@@ -61,12 +62,14 @@ export default function GearPage() {
 interface ItemListProps {
   items: Item[];
   reload: () => void;
+  /** Called when an edit is submitted. */
+  onSubmit: () => void;
   /** Called with the errors of an edit refused because the item no longer exists. */
   onGone: (errors: FieldErrors) => void;
   onDelete: (item: Item) => void;
 }
 
-function ItemList({ items, reload, onGone, onDelete }: ItemListProps) {
+function ItemList({ items, reload, onSubmit, onGone, onDelete }: ItemListProps) {
   const [editing, setEditing] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<Item | null>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -98,6 +101,7 @@ function ItemList({ items, reload, onGone, onDelete }: ItemListProps) {
               {editing === item.id ? (
                 <EditItem
                   item={item}
+                  onSubmit={onSubmit}
                   onSaved={() => {
                     close(item);
                     reload();
@@ -152,12 +156,13 @@ function ItemList({ items, reload, onGone, onDelete }: ItemListProps) {
 
 interface EditItemProps {
   item: Item;
+  onSubmit: () => void;
   onSaved: () => void;
   onGone: (errors: FieldErrors) => void;
   onCancel: () => void;
 }
 
-function EditItem({ item, onSaved, onGone, onCancel }: EditItemProps) {
+function EditItem({ item, onSubmit, onSaved, onGone, onCancel }: EditItemProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const formRef = useFocusFirstInvalid(errors);
 
@@ -167,6 +172,7 @@ function EditItem({ item, onSaved, onGone, onCancel }: EditItemProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    onSubmit();
     try {
       const response = await apiFetch(`/api/items/${item.id}/`, {
         method: "PATCH",
@@ -203,13 +209,14 @@ function EditItem({ item, onSaved, onGone, onCancel }: EditItemProps) {
   );
 }
 
-function AddItem({ reload }: { reload: () => void }) {
+function AddItem({ reload, onSubmit }: { reload: () => void; onSubmit: () => void }) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
+    onSubmit();
     try {
       const response = await apiFetch("/api/items/", { method: "POST", body: itemFields(form) });
       if (!response.ok) {

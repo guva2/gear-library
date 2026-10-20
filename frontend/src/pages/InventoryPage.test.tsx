@@ -534,20 +534,25 @@ describe("items", () => {
     id: 20,
     name: "Rope",
     description: "60 m dynamic",
-    owner: { id: ADA.id, first_name: "Ada", last_name: "Lovelace" },
+    owner: { first_name: "Ada", last_name: "Lovelace" },
   };
   const TENT = {
     id: 21,
     name: "Tent",
     description: "",
-    owner: { id: BOB.id, first_name: "Bob", last_name: "Stone" },
+    owner: { first_name: "Bob", last_name: "Stone" },
   };
   const HELMET = { id: 23, name: "Helmet", description: "", inventories: [] };
   // The caller's own items: the rope is listed here, the axe and the helmet are not.
   const MY_ITEMS = [
     { id: 22, name: "Axe", description: "", inventories: [] },
     HELMET,
-    { ...ROPE, inventories: [{ id: 7, name: "Climbing Club" }] },
+    {
+      id: ROPE.id,
+      name: ROPE.name,
+      description: ROPE.description,
+      inventories: [{ id: 7, name: "Climbing Club" }],
+    },
   ];
 
   function withItems(role: Role, routes: Routes = {}) {
@@ -661,6 +666,20 @@ describe("items", () => {
     expect(await within(region("Items")).findByRole("alert")).toHaveTextContent(
       "Axe was not listed. This item is already listed in this inventory.",
     );
+  });
+
+  it("clears an invite refusal when another action on the page succeeds", async () => {
+    withItems("admin", {
+      [`POST ${URL}invites/`]: json(400, { user_id: ["You can invite only your connections."] }),
+      [`POST ${URL}items/`]: json(201, { ...HELMET, owner: ROPE.owner }),
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    expect(await within(region("Pending invites")).findByRole("alert")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "List item" }));
+
+    await waitFor(() => expect(within(region("Pending invites")).queryByRole("alert")).toBeNull());
   });
 
   it.each([

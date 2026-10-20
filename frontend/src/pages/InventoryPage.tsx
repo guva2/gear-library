@@ -89,6 +89,8 @@ function InventoryView({ base }: { base: string }) {
   const [page, reload] = useLoad((signal) => loadPage(base, signal));
   const [errors, setErrors] = useState<FieldErrors>({});
   const [refusal, setRefusal] = useState<FieldErrors>({});
+  // Counts the changes sent, so the pickers can drop messages left by an earlier one.
+  const [sent, setSent] = useState(0);
 
   /**
    * Sends a change. Returns the failure for the caller to show, or `null` when it succeeded.
@@ -98,6 +100,7 @@ function InventoryView({ base }: { base: string }) {
   const send: Send = async (path, method, { body, fields = [] } = {}) => {
     setRefusal({});
     setErrors({});
+    setSent((count) => count + 1);
     try {
       const response = await apiFetch(path, { method, body });
       if (response.ok) return null;
@@ -132,6 +135,7 @@ function InventoryView({ base }: { base: string }) {
 
   const { inventory, people, invites, connections, listed, myItems } = page.data;
   const isOwner = inventory.role === "owner";
+  const myItemIds = new Set(myItems.map((item) => item.id));
   return (
     <>
       <h2>{inventory.name}</h2>
@@ -163,6 +167,7 @@ function InventoryView({ base }: { base: string }) {
           invites={invites}
           invitable={invitable(connections, people.members, invites)}
           send={send}
+          sent={sent}
           base={base}
           reload={reload}
           onRevoke={(invite) => act(`/api/invites/${invite.id}/revoke/`, "POST")}
@@ -171,8 +176,9 @@ function InventoryView({ base }: { base: string }) {
       <Items
         listed={listed}
         listable={people.staff ? listable(myItems, listed) : null}
-        removable={(item) => people.staff && (isOwner || item.owner.id === user?.id)}
+        removable={(item) => people.staff && (isOwner || myItemIds.has(item.id))}
         send={send}
+        sent={sent}
         base={base}
         reload={reload}
         onRemove={(item) => act(`${base}items/${item.id}/`, "DELETE")}
@@ -299,12 +305,13 @@ interface InvitesProps {
   invites: InventoryInvite[];
   invitable: Connection["user"][];
   send: Send;
+  sent: number;
   base: string;
   reload: () => void;
   onRevoke: (invite: InventoryInvite) => void;
 }
 
-function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesProps) {
+function Invites({ invites, invitable, send, sent, base, reload, onRevoke }: InvitesProps) {
   return (
     <section aria-labelledby="invites">
       <h3 id="invites">Pending invites</h3>
@@ -350,6 +357,7 @@ function Invites({ invites, invitable, send, base, reload, onRevoke }: InvitesPr
         }
         path={`${base}invites/`}
         send={send}
+        sent={sent}
         reload={reload}
       />
     </section>
@@ -368,12 +376,13 @@ interface ItemsProps {
   listable: Item[] | null;
   removable: (item: ListedItem) => boolean;
   send: Send;
+  sent: number;
   base: string;
   reload: () => void;
   onRemove: (item: ListedItem) => void;
 }
 
-function Items({ listed, listable, removable, send, base, reload, onRemove }: ItemsProps) {
+function Items({ listed, listable, removable, send, sent, base, reload, onRemove }: ItemsProps) {
   return (
     <section aria-labelledby="items">
       <h3 id="items">Items</h3>
@@ -415,6 +424,7 @@ function Items({ listed, listable, removable, send, base, reload, onRemove }: It
           }
           path={`${base}items/`}
           send={send}
+          sent={sent}
           reload={reload}
         />
       )}
@@ -443,6 +453,8 @@ interface PickerProps {
   empty: ReactNode;
   path: string;
   send: Send;
+  /** The page's count of changes sent. A change from elsewhere on the page clears the errors. */
+  sent: number;
   reload: () => void;
 }
 
@@ -457,9 +469,11 @@ function Picker({
   empty,
   path,
   send,
+  sent,
   reload,
 }: PickerProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  useEffect(() => setErrors({}), [sent]);
   const container = useRef<HTMLDivElement>(null);
   const emptyState = useRef<HTMLParagraphElement>(null);
   const hadForm = useRef(options.length > 0);

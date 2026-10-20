@@ -413,7 +413,7 @@ name.
 | `id` | integer | The item's id. |
 | `name` | string | |
 | `description` | string | `""` when there is none. |
-| `owner` | object | The item's owner: `id`, `first_name` and `last_name`. The owner is always an admin or owner of the inventory. |
+| `owner` | object | The item's owner: `first_name` and `last_name` only, so a `member` learns no user id. The owner is always an admin or owner of the inventory. |
 
 #### `POST /api/inventories/{id}/items/`
 
