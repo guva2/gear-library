@@ -20,6 +20,7 @@ import {
   borrowerText,
   describeItem,
   LOAN_STATUS_LABELS,
+  type BorrowedItem,
   type Item,
   type ListedItem,
 } from "../items";
@@ -38,12 +39,14 @@ interface PageData {
   listed: ListedItem[];
   /** The caller's own items. Loaded only for admins and owners. */
   myItems: Item[];
+  /** Ids of the items the caller holds, through any inventory, and may mark returned. */
+  heldReturnable: ReadonlySet<number>;
 }
 
 async function loadPage(base: string, signal: AbortSignal): Promise<PageData> {
   const inventory = await getJson<Inventory>(base, signal);
   const staff = hasRole(inventory.role, "admin");
-  const [people, invites, connections, listed, myItems] = await Promise.all([
+  const [people, invites, connections, listed, myItems, borrowed] = await Promise.all([
     staff
       ? getJson<Member[]>(`${base}members/`, signal).then(
           (members): People => ({ staff: true, members }),
@@ -55,8 +58,14 @@ async function loadPage(base: string, signal: AbortSignal): Promise<PageData> {
     staff ? getJson<Connection[]>("/api/connections/", signal) : [],
     getJson<ListedItem[]>(`${base}items/`, signal),
     staff ? getJson<Item[]>("/api/items/", signal) : [],
+    getJson<BorrowedItem[]>("/api/borrowing/", signal),
   ]);
-  return { inventory, people, invites, connections, listed, myItems };
+  const heldReturnable = new Set(
+    borrowed
+      .filter((item) => item.loan_status === "on_loan" && item.can_return)
+      .map((item) => item.id),
+  );
+  return { inventory, people, invites, connections, listed, myItems, heldReturnable };
 }
 
 type Method = "POST" | "PATCH" | "DELETE";
@@ -139,7 +148,8 @@ function InventoryView({ base }: { base: string }) {
     return <p role="alert">Could not load the inventory.</p>;
   }
 
-  const { inventory, people, invites, connections, listed, myItems } = page.data;
+  const { inventory, people, invites, connections, listed, myItems, heldReturnable } =
+    page.data;
   const isOwner = inventory.role === "owner";
   const myItemIds = new Set(myItems.map((item) => item.id));
   return (
@@ -185,6 +195,7 @@ function InventoryView({ base }: { base: string }) {
         listable={people.staff ? listable(myItems, listed) : null}
         removable={(item) => people.staff && (isOwner || myItemIds.has(item.id))}
         owned={(item) => myItemIds.has(item.id)}
+        heldReturnable={heldReturnable}
         send={send}
         sent={sent}
         base={base}
@@ -403,10 +414,14 @@ function holderReturnPath({ item, owned, staff, base }: Holding): string | null 
   return null;
 }
 
-/** The loan status, with who has requested or borrowed the item when the caller may see it. */
-function loanText(holding: Holding): string {
+/**
+ * The loan status, with who has requested or borrowed the item when the caller may see it.
+ * `heldReturnable` is true when the caller holds the item through any inventory and may
+ * mark it returned themselves.
+ */
+function loanText(holding: Holding, heldReturnable: boolean): string {
   const { item } = holding;
-  if (holderReturnPath(holding)) return "In use by you";
+  if (heldReturnable || holderReturnPath(holding)) return "In use by you";
   const borrower = item.borrowed_by_me ? "you" : item.borrower;
   if (!borrower) return LOAN_STATUS_LABELS[item.loan_status];
   return borrowerText(item.loan_status, borrower);
@@ -419,7 +434,7 @@ interface LoanButtonsProps extends Holding {
 
 /**
  * The loan changes the caller may make. Approve, decline and mark returned send the
- * borrower the page showed. Mark unavailable and Mark available share a key, so the button
+ * borrower the page showed. Use it myself and Done using it share a key, so the button
  * keeps focus when the item changes between them.
  */
 function LoanButtons({ userId, onLoanChange, ...holding }: LoanButtonsProps) {
@@ -431,22 +446,22 @@ function LoanButtons({ userId, onLoanChange, ...holding }: LoanButtonsProps) {
   if (item.loan_status === "available" && (owned || staff)) {
     buttons.push({
       key: "availability",
-      label: "Mark unavailable",
-      name: `Mark ${item.name} unavailable`,
+      label: "Use it myself",
+      name: `Use it myself: ${item.name}`,
       onClick: () => onLoanChange(owned ? `/api/items/${item.id}/use/` : `${path}borrow/`),
     });
   } else if (item.loan_status === "available") {
     buttons.push({
-      label: "Request",
-      name: `Request ${item.name}`,
+      label: "Ask to borrow",
+      name: `Ask to borrow ${item.name}`,
       onClick: () => onLoanChange(`${path}borrow/`),
     });
   }
   if (returnPath && userId !== undefined) {
     buttons.push({
       key: "availability",
-      label: "Mark available",
-      name: `Mark ${item.name} available`,
+      label: "Done using it",
+      name: `Done using it: ${item.name}`,
       onClick: () => onLoanChange(returnPath, { borrower_id: userId }),
     });
   }
@@ -497,6 +512,8 @@ interface ItemsProps {
   removable: (item: ListedItem) => boolean;
   /** True for the caller's own items. */
   owned: (item: ListedItem) => boolean;
+  /** Ids of the items the caller holds, through any inventory, and may mark returned. */
+  heldReturnable: ReadonlySet<number>;
   send: Send;
   sent: number;
   base: string;
@@ -511,6 +528,7 @@ function Items({
   listable,
   removable,
   owned,
+  heldReturnable,
   send,
   sent,
   base,
@@ -529,7 +547,7 @@ function Items({
           {listed.map((item) => (
             <li key={item.id}>
               <span>{`${describeItem(item)}, owned by ${fullName(item.owner)}`}</span>{" "}
-              <span>{loanText({ item, owned: owned(item), staff, base })}</span>
+              <span>{loanText({ item, owned: owned(item), staff, base }, heldReturnable.has(item.id))}</span>
               <LoanButtons
                 item={item}
                 owned={owned(item)}

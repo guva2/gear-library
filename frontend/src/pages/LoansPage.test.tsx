@@ -195,13 +195,13 @@ describe("my requests and borrowed", () => {
     await open();
 
     expect(texts("My requests")).toEqual([
-      "Stove: gas, owned by Bob Stone. Requested through Camping Crew.",
+      "Stove: gas, owned by Bob Stone. Waiting for approval through Camping Crew.",
     ]);
-    expect(texts("Borrowed")).toEqual(["Tent, owned by Bob Stone. On loan to you."]);
+    expect(texts("Borrowed")).toEqual(["Tent, owned by Bob Stone. Borrowed by you."]);
     expect(within(region("Borrowed")).queryByRole("button")).toBeNull();
   });
 
-  it("lists what the caller may mark available under Using, apart from Borrowed", async () => {
+  it("lists what the caller may give back itself under Using, apart from Borrowed", async () => {
     liveBackend();
 
     await open();
@@ -210,13 +210,13 @@ describe("my requests and borrowed", () => {
       "Bivy, owned by Bob Stone. In use by you, through Climbing Club.",
       "Headlamp, yours. In use by you.",
     ]);
-    expect(texts("Borrowed")).toEqual(["Tent, owned by Bob Stone. On loan to you."]);
+    expect(texts("Borrowed")).toEqual(["Tent, owned by Bob Stone. Borrowed by you."]);
   });
 
   it.each([
     ["Bivy", "/api/inventories/7/items/32/return/"],
     ["Headlamp", "/api/items/33/return/"],
-  ])("marks %s available through %s, then reloads", async (name, path) => {
+  ])("is done using %s through %s, then reloads", async (name, path) => {
     const backend = liveBackend((state) => ({
       [`POST ${path}`]: () => {
         state.borrowed = state.borrowed.filter((item) => item.name !== name);
@@ -225,7 +225,9 @@ describe("my requests and borrowed", () => {
     }));
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: `Mark ${name} available` }));
+    const button = screen.getByRole("button", { name: `Done using it: ${name}` });
+    expect(button).toHaveTextContent(/^Done using it$/);
+    fireEvent.click(button);
 
     await waitFor(() => expect(texts("Using")).toHaveLength(1));
     expect(backend.requests(`POST ${path}`)).toEqual([{ borrower_id: ADA.id }]);

@@ -191,7 +191,7 @@ interface LoanButtonProps {
 }
 
 /**
- * Mark unavailable while the item is available, Mark available while the owner uses it, and
+ * Use it myself while the item is available, Done using it while the owner uses it, and
  * Mark returned while someone else has it on loan. One button, so focus stays on it when
  * the item changes state.
  */
@@ -200,14 +200,14 @@ function LoanButton({ item, inUse, onReturn, onUse }: LoanButtonProps) {
   let action: { label: string; name: string; run: () => void };
   if (item.loan_status === "available") {
     action = {
-      label: "Mark unavailable",
-      name: `Mark ${item.name} unavailable`,
+      label: "Use it myself",
+      name: `Use it myself: ${item.name}`,
       run: () => onUse(item),
     };
   } else if (item.loan_status === "on_loan" && borrower) {
     const run = () => onReturn(item, borrower.id);
     action = inUse
-      ? { label: "Mark available", name: `Mark ${item.name} available`, run }
+      ? { label: "Done using it", name: `Done using it: ${item.name}`, run }
       : { label: "Mark returned", name: `Mark ${item.name} returned`, run };
   } else {
     return null;

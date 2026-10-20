@@ -42,7 +42,7 @@ function usingText(item: BorrowedItem): string {
 function borrowedText(item: BorrowedItem): string {
   const owned = `${describeItem(item)}, owned by ${fullName(item.owner)}.`;
   const through = item.loan_inventory ? ` through ${item.loan_inventory.name}` : "";
-  const state = item.loan_status === "requested" ? "Requested" : "On loan to you";
+  const state = borrowerText(item.loan_status, "you");
   return `${owned} ${state}${through}.`;
 }
 
@@ -104,8 +104,8 @@ export default function LoansPage() {
     const body = { borrower_id: user.id };
     return [
       {
-        label: "Mark available",
-        name: `Mark ${item.name} available`,
+        label: "Done using it",
+        name: `Done using it: ${item.name}`,
         run: () => change(holderReturnPath(item), "POST", body),
       },
     ];

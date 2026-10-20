@@ -83,11 +83,14 @@ export function describeItem(item: { name: string; description: string }): strin
   return item.description ? `${item.name}: ${item.description}` : item.name;
 }
 
-/** "Requested by" or "On loan to", then `borrower` by name and phone number, or "you". */
+/**
+ * "Requested by" or "On loan to", then `borrower` by name and phone number. For "you",
+ * "Waiting for approval" or "Borrowed by you".
+ */
 export function borrowerText(loanStatus: LoanStatus, borrower: User | "you"): string {
-  const who =
-    borrower === "you"
-      ? borrower
-      : `${fullName(borrower)}, ${formatPhoneNumber(borrower.phone_number)}`;
+  if (borrower === "you") {
+    return loanStatus === "requested" ? "Waiting for approval" : "Borrowed by you";
+  }
+  const who = `${fullName(borrower)}, ${formatPhoneNumber(borrower.phone_number)}`;
   return loanStatus === "requested" ? `Requested by ${who}` : `On loan to ${who}`;
 }

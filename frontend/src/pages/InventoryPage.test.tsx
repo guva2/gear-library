@@ -50,6 +50,7 @@ function asRole(role: Role, routes: Routes = {}) {
     "GET /api/auth/me/": json(200, ADA),
     [`GET ${URL}`]: json(200, { id: 7, name: "Climbing Club", role }),
     [`GET ${URL}items/`]: json(200, []),
+    "GET /api/borrowing/": json(200, []),
     ...staffRoutes,
     ...routes,
   });
@@ -800,7 +801,7 @@ describe("borrowing", () => {
   }
 
   describe("as a member", () => {
-    it("shows each item's status, and Request only on available items", async () => {
+    it("shows each item's status, and Ask to borrow only on available items", async () => {
       withListed("member", () => [ROPE, STOVE, TENT]);
 
       await open();
@@ -808,7 +809,10 @@ describe("borrowing", () => {
       expect(within(itemFor("Rope")).getByText("Available")).toBeVisible();
       expect(within(itemFor("Tent")).getByText("Requested")).toBeVisible();
       expect(within(itemFor("Stove")).getByText("On loan")).toBeVisible();
-      expect(buttonNames()).toEqual(["Request Rope"]);
+      expect(buttonNames()).toEqual(["Ask to borrow Rope"]);
+      expect(screen.getByRole("button", { name: "Ask to borrow Rope" })).toHaveTextContent(
+        /^Ask to borrow$/,
+      );
     });
 
     it("requests an item, reloads, and then offers Cancel", async () => {
@@ -821,9 +825,9 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Request Rope" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow Rope" }));
 
-      expect(await within(itemFor("Rope")).findByText("Requested by you")).toBeVisible();
+      expect(await within(itemFor("Rope")).findByText("Waiting for approval")).toBeVisible();
       expect(buttonNames()).toEqual(["Cancel request for Rope"]);
       expect(backend.requests(`POST ${URL}items/20/borrow/`)).toEqual([undefined]);
     });
@@ -852,7 +856,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Request Rope" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow Rope" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "This item has already been requested or is on loan.",
@@ -864,7 +868,7 @@ describe("borrowing", () => {
 
       await open();
 
-      expect(within(itemFor("Stove")).getByText("On loan to you")).toBeVisible();
+      expect(within(itemFor("Stove")).getByText("Borrowed by you")).toBeVisible();
       expect(buttonNames()).toEqual([]);
     });
   });
@@ -947,7 +951,7 @@ describe("borrowing", () => {
       );
     });
 
-    it("offers Mark available, not Approve, Decline or Mark returned, on their own", async () => {
+    it("offers Done using it, not Approve, Decline or Mark returned, on their own", async () => {
       const mine = { borrower: ADA, borrowed_by_me: true };
       withListed("admin", () => [
         { ...STOVE, ...mine },
@@ -958,13 +962,29 @@ describe("borrowing", () => {
 
       await open();
 
-      expect(within(itemFor("Tent")).getByText("Requested by you")).toBeVisible();
+      expect(within(itemFor("Tent")).getByText("Waiting for approval")).toBeVisible();
       expect(within(itemFor("Stove")).getByText("In use by you")).toBeVisible();
-      expect(within(itemFor("Lamp")).getByText("On loan to you")).toBeVisible();
-      expect(buttonNames()).toEqual(["Mark Stove available", "Cancel request for Tent"]);
+      expect(within(itemFor("Lamp")).getByText("Borrowed by you")).toBeVisible();
+      expect(buttonNames()).toEqual(["Done using it: Stove", "Cancel request for Tent"]);
     });
 
-    it("marks someone else's item unavailable without a request, then available", async () => {
+    it("says In use by you for a use through another inventory, Borrowed by you for a loan", async () => {
+      const held = { ...LAMP, borrowed_by_me: true };
+      withListed("admin", () => [held, { ...STOVE, borrowed_by_me: true }], {
+        "GET /api/borrowing/": json(200, [
+          { id: 23, loan_status: "on_loan", can_return: true },
+          { id: 22, loan_status: "on_loan", can_return: false },
+        ]),
+      });
+
+      await open();
+
+      expect(within(itemFor("Lamp")).getByText("In use by you")).toBeVisible();
+      expect(within(itemFor("Stove")).getByText("Borrowed by you")).toBeVisible();
+      expect(buttonNames()).toEqual([]);
+    });
+
+    it("uses someone else's item without a request, then is done using it", async () => {
       let rope = ROPE;
       const backend = withListed("admin", () => [rope], {
         [`POST ${URL}items/20/borrow/`]: () => {
@@ -977,17 +997,19 @@ describe("borrowing", () => {
         },
       });
       await open();
-      expect(buttonNames()).toEqual(["Mark Rope unavailable"]);
-      const button = screen.getByRole("button", { name: "Mark Rope unavailable" });
+      expect(buttonNames()).toEqual(["Use it myself: Rope"]);
+      const button = screen.getByRole("button", { name: "Use it myself: Rope" });
+      expect(button).toHaveTextContent(/^Use it myself$/);
 
       fireEvent.click(button);
 
       expect(await within(itemFor("Rope")).findByText("In use by you")).toBeVisible();
-      expect(buttonNames()).toEqual(["Mark Rope available"]);
-      expect(screen.getByRole("button", { name: "Mark Rope available" })).toBe(button);
+      expect(buttonNames()).toEqual(["Done using it: Rope"]);
+      expect(screen.getByRole("button", { name: "Done using it: Rope" })).toBe(button);
+      expect(button).toHaveTextContent(/^Done using it$/);
       expect(backend.requests(`POST ${URL}items/20/borrow/`)).toEqual([undefined]);
 
-      fireEvent.click(screen.getByRole("button", { name: "Mark Rope available" }));
+      fireEvent.click(screen.getByRole("button", { name: "Done using it: Rope" }));
 
       expect(await within(itemFor("Rope")).findByText("Available")).toBeVisible();
       expect(backend.requests(`POST ${URL}items/20/return/`)).toEqual([{ borrower_id: ADA.id }]);
@@ -1004,7 +1026,7 @@ describe("borrowing", () => {
         loan_inventory: null,
       };
 
-      it("marks it unavailable as its owner, then available", async () => {
+      it("uses it as its owner, then is done using it", async () => {
         let rope: ListedItem = ROPE;
         const backend = withListed("admin", () => [rope], {
           "GET /api/items/": json(200, [MY_ROPE]),
@@ -1018,14 +1040,14 @@ describe("borrowing", () => {
           },
         });
         await open();
-        expect(buttonNames()).toEqual(["Mark Rope unavailable", "Remove Rope from the inventory"]);
+        expect(buttonNames()).toEqual(["Use it myself: Rope", "Remove Rope from the inventory"]);
 
-        fireEvent.click(screen.getByRole("button", { name: "Mark Rope unavailable" }));
+        fireEvent.click(screen.getByRole("button", { name: "Use it myself: Rope" }));
 
         expect(await within(itemFor("Rope")).findByText("In use by you")).toBeVisible();
         expect(backend.requests("POST /api/items/20/use/")).toEqual([undefined]);
 
-        fireEvent.click(screen.getByRole("button", { name: "Mark Rope available" }));
+        fireEvent.click(screen.getByRole("button", { name: "Done using it: Rope" }));
 
         expect(await within(itemFor("Rope")).findByText("Available")).toBeVisible();
         expect(backend.requests("POST /api/items/20/return/")).toEqual([

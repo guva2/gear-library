@@ -346,7 +346,7 @@ describe("loans of my items", () => {
     expect(backend.requests("POST /api/items/20/return/")).toEqual([{ borrower_id: MIA.id }]);
   });
 
-  it("marks an available item unavailable, then offers to mark it available", async () => {
+  it("uses an available item, then offers Done using it", async () => {
     const backend = liveBackend((state) => ({
       "POST /api/items/21/use/": () => {
         state.items = [{ ...AXE, loan_status: "on_loan", borrower: ADA }, ROPE];
@@ -355,17 +355,19 @@ describe("loans of my items", () => {
     }));
     await open();
 
-    const button = within(itemFor("Axe")).getByRole("button", { name: "Mark Axe unavailable" });
+    const button = within(itemFor("Axe")).getByRole("button", { name: "Use it myself: Axe" });
+    expect(button).toHaveTextContent(/^Use it myself$/);
     fireEvent.click(button);
 
     expect(await within(itemFor("Axe")).findByText("In use by you.")).toBeVisible();
-    const again = within(itemFor("Axe")).getByRole("button", { name: "Mark Axe available" });
+    const again = within(itemFor("Axe")).getByRole("button", { name: "Done using it: Axe" });
     expect(again).toBe(button);
+    expect(again).toHaveTextContent(/^Done using it$/);
     expect(within(itemFor("Axe")).queryByRole("button", { name: /returned$/ })).toBeNull();
     expect(backend.requests("POST /api/items/21/use/")).toEqual([undefined]);
   });
 
-  it("marks an item in use available as its holder", async () => {
+  it("is done using an item it uses", async () => {
     const backend = liveBackend((state) => {
       state.items = [{ ...AXE, loan_status: "on_loan", borrower: ADA }];
       return {
@@ -377,13 +379,13 @@ describe("loans of my items", () => {
     });
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark Axe available" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done using it: Axe" }));
 
     expect(await within(itemFor("Axe")).findByText("Available.")).toBeVisible();
     expect(backend.requests("POST /api/items/21/return/")).toEqual([{ borrower_id: ADA.id }]);
   });
 
-  it("offers no way to mark a requested or lent item unavailable", async () => {
+  it("offers no way to use a requested or lent item", async () => {
     liveBackend((state) => {
       const requested = { loan_status: "requested", borrower: MIA } as const;
       state.items = [{ ...AXE, ...requested, loan_inventory: ON_LOAN.loan_inventory }, ON_LOAN];

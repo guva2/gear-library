@@ -2,7 +2,12 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "../auth";
 import { FormErrors, useChange } from "../forms";
 import { fullName, getJson, hasRole } from "../inventories";
-import { LOAN_STATUS_LABELS, type BorrowedItem, type DiscoverItem } from "../items";
+import {
+  borrowerText,
+  LOAN_STATUS_LABELS,
+  type BorrowedItem,
+  type DiscoverItem,
+} from "../items";
 import { useLoad } from "../load";
 
 interface PageData {
@@ -29,7 +34,7 @@ async function loadPage(signal: AbortSignal): Promise<PageData> {
 function statusText(item: DiscoverItem, inUse: boolean): string {
   if (!item.borrowed_by_me) return LOAN_STATUS_LABELS[item.loan_status];
   if (inUse) return "In use by you";
-  return item.loan_status === "requested" ? "Requested by you" : "On loan to you";
+  return borrowerText(item.loan_status, "you");
 }
 
 /** The items in the signed-in user's inventories that someone else owns. */
@@ -93,8 +98,8 @@ function ItemCard({ item, actedOn, onRequest, onMarkAvailable }: ItemCardProps) 
   const available = item.loan_status === "available";
   const heading = useRef<HTMLHeadingElement>(null);
   const wasAvailable = useRef(available);
-  // The inventories where the user is an admin or owner. Through any of them they mark the
-  // item unavailable without a request, whatever their role in the others.
+  // The inventories where the user is an admin or owner. Through any of them they take the
+  // item for their own use without a request, whatever their role in the others.
   const usableThrough = item.inventories.filter((inventory) => hasRole(inventory.role, "admin"));
 
   // The card's controls unmount when the item changes between available and not; focus
@@ -125,10 +130,10 @@ function ItemCard({ item, actedOn, onRequest, onMarkAvailable }: ItemCardProps) 
         <p>
           <button
             type="button"
-            aria-label={`Mark ${item.name} available`}
+            aria-label={`Done using it: ${item.name}`}
             onClick={onMarkAvailable}
           >
-            Mark available
+            Done using it
           </button>
         </p>
       )}
@@ -146,18 +151,18 @@ interface BorrowWording {
 }
 
 const REQUEST: BorrowWording = {
-  button: "Request",
-  label: (itemName) => `Request ${itemName}`,
-  choose: "Request through",
+  button: "Ask to borrow",
+  label: (itemName) => `Ask to borrow ${itemName}`,
+  choose: "Borrow through",
   submit: "Send request",
-  idPrefix: "request-through",
+  idPrefix: "borrow-through",
 };
 
 const MARK_UNAVAILABLE: BorrowWording = {
-  button: "Mark unavailable",
-  label: (itemName) => `Mark ${itemName} unavailable`,
-  choose: "Mark unavailable through",
-  submit: "Mark unavailable",
+  button: "Use it myself",
+  label: (itemName) => `Use it myself: ${itemName}`,
+  choose: "Use through",
+  submit: "Use it myself",
   idPrefix: "use-through",
 };
 

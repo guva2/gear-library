@@ -80,9 +80,9 @@ describe("discover", () => {
   });
 
   it.each([
-    ["Tent", "Requested by you"],
+    ["Tent", "Waiting for approval"],
     ["Stove", "On loan"],
-  ])("greys out %s with its status and no Request", async (name, status) => {
+  ])("greys out %s with its status and no Ask to borrow", async (name, status) => {
     liveBackend();
 
     await open();
@@ -92,7 +92,7 @@ describe("discover", () => {
     expect(within(card(name)).queryByRole("button")).toBeNull();
   });
 
-  it("says when the caller's own request is on loan to them", async () => {
+  it("says when the caller has borrowed the item", async () => {
     liveBackend((state) => {
       state.items = [{ ...TENT, loan_status: "on_loan" }];
       return {};
@@ -100,7 +100,7 @@ describe("discover", () => {
 
     await open();
 
-    expect(within(card("Tent")).getByText("On loan to you")).toBeInTheDocument();
+    expect(within(card("Tent")).getByText("Borrowed by you")).toBeInTheDocument();
   });
 
   it("requests an item listed in one inventory through it, then reloads", async () => {
@@ -112,9 +112,11 @@ describe("discover", () => {
     }));
     await open();
 
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Request Axe" }));
+    const button = within(card("Axe")).getByRole("button", { name: "Ask to borrow Axe" });
+    expect(button).toHaveTextContent(/^Ask to borrow$/);
+    fireEvent.click(button);
 
-    expect(await within(card("Axe")).findByText("Requested by you")).toBeInTheDocument();
+    expect(await within(card("Axe")).findByText("Waiting for approval")).toBeInTheDocument();
     await waitFor(() =>
       expect(within(card("Axe")).getByRole("heading", { name: "Axe" })).toHaveFocus(),
     );
@@ -127,8 +129,8 @@ describe("discover", () => {
     }));
     await open();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Request Rope" }));
-    const through = within(card("Rope")).getByLabelText("Request through");
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Ask to borrow Rope" }));
+    const through = within(card("Rope")).getByLabelText("Borrow through");
     expect(through).toHaveValue("8");
     expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(0);
 
@@ -149,13 +151,13 @@ describe("discover", () => {
     }));
     await open();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Request Rope" }));
-    fireEvent.change(within(card("Rope")).getByLabelText("Request through"), {
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Ask to borrow Rope" }));
+    fireEvent.change(within(card("Rope")).getByLabelText("Borrow through"), {
       target: { value: "7" },
     });
     fireEvent.click(within(card("Rope")).getByRole("button", { name: "Send request" }));
 
-    expect(await within(card("Rope")).findByText("Requested by you")).toBeInTheDocument();
+    expect(await within(card("Rope")).findByText("Waiting for approval")).toBeInTheDocument();
     await waitFor(() =>
       expect(within(card("Rope")).getByRole("heading", { name: "Rope" })).toHaveFocus(),
     );
@@ -165,12 +167,12 @@ describe("discover", () => {
     const backend = liveBackend();
     await open();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Request Rope" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Ask to borrow Rope" }));
     fireEvent.click(within(card("Rope")).getByRole("button", { name: "Cancel" }));
 
-    expect(within(card("Rope")).queryByLabelText("Request through")).toBeNull();
+    expect(within(card("Rope")).queryByLabelText("Borrow through")).toBeNull();
     await waitFor(() =>
-      expect(within(card("Rope")).getByRole("button", { name: "Request Rope" })).toHaveFocus(),
+      expect(within(card("Rope")).getByRole("button", { name: "Ask to borrow Rope" })).toHaveFocus(),
     );
     expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(0);
   });
@@ -188,7 +190,7 @@ describe("discover", () => {
     }));
     await open();
 
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Request Axe" }));
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow Axe" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This item has already been requested or is on loan.",
@@ -230,7 +232,7 @@ describe("discover as an admin or owner", () => {
     can_return: true,
   };
 
-  it("marks an item unavailable through the inventory that makes the caller an admin", async () => {
+  it("uses an item through the inventory that makes the caller an admin", async () => {
     const backend = liveBackend((state) => {
       state.items = [{ ...ROPE, inventories: [CAMPING, ADMIN_OF_CLIMBING] }];
       return {
@@ -242,17 +244,19 @@ describe("discover as an admin or owner", () => {
       };
     });
     await open();
-    expect(within(card("Rope")).queryByRole("button", { name: "Request Rope" })).toBeNull();
+    expect(within(card("Rope")).queryByRole("button", { name: "Ask to borrow Rope" })).toBeNull();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
+    const button = within(card("Rope")).getByRole("button", { name: "Use it myself: Rope" });
+    expect(button).toHaveTextContent(/^Use it myself$/);
+    fireEvent.click(button);
 
-    expect(within(card("Rope")).queryByLabelText("Request through")).toBeNull();
-    expect(within(card("Rope")).queryByLabelText("Mark unavailable through")).toBeNull();
+    expect(within(card("Rope")).queryByLabelText("Borrow through")).toBeNull();
+    expect(within(card("Rope")).queryByLabelText("Use through")).toBeNull();
     expect(await within(card("Rope")).findByText("In use by you")).toBeInTheDocument();
     expect(backend.requests("POST /api/inventories/7/items/20/borrow/")).toEqual([undefined]);
   });
 
-  it("asks which inventory to mark unavailable through when the caller is an admin in several", async () => {
+  it("asks which inventory to use the item through when the caller is an admin in several", async () => {
     const HIKING = { id: 9, name: "Hiking Group", role: "member" } as const;
     const backend = liveBackend((state) => {
       state.items = [{ ...ROPE, inventories: [HIKING, OWNER_OF_CAMPING, ADMIN_OF_CLIMBING] }];
@@ -260,8 +264,8 @@ describe("discover as an admin or owner", () => {
     });
     await open();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
-    const through = within(card("Rope")).getByLabelText("Mark unavailable through");
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Use it myself: Rope" }));
+    const through = within(card("Rope")).getByLabelText("Use through");
     expect(
       within(through)
         .getAllByRole("option")
@@ -271,7 +275,7 @@ describe("discover as an admin or owner", () => {
     await waitFor(() => expect(through).toHaveFocus());
 
     fireEvent.change(through, { target: { value: "7" } });
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark unavailable" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Use it myself" }));
 
     await waitFor(() =>
       expect(backend.requests("POST /api/inventories/7/items/20/borrow/")).toEqual([undefined]),
@@ -279,7 +283,7 @@ describe("discover as an admin or owner", () => {
     expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(0);
   });
 
-  it("moves focus to the card heading after marking unavailable from the inventory choice", async () => {
+  it("moves focus to the card heading after using the item from the inventory choice", async () => {
     liveBackend((state) => {
       state.items = [{ ...ROPE, inventories: [OWNER_OF_CAMPING, ADMIN_OF_CLIMBING] }];
       return {
@@ -292,8 +296,8 @@ describe("discover as an admin or owner", () => {
     });
     await open();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark unavailable" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Use it myself: Rope" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Use it myself" }));
 
     expect(await within(card("Rope")).findByText("In use by you")).toBeInTheDocument();
     await waitFor(() =>
@@ -301,26 +305,26 @@ describe("discover as an admin or owner", () => {
     );
   });
 
-  it("closes the mark-unavailable choice on Cancel without borrowing", async () => {
+  it("closes the use choice on Cancel without borrowing", async () => {
     const backend = liveBackend((state) => {
       state.items = [{ ...ROPE, inventories: [OWNER_OF_CAMPING, ADMIN_OF_CLIMBING] }];
       return {};
     });
     await open();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Use it myself: Rope" }));
     fireEvent.click(within(card("Rope")).getByRole("button", { name: "Cancel" }));
 
-    expect(within(card("Rope")).queryByLabelText("Mark unavailable through")).toBeNull();
+    expect(within(card("Rope")).queryByLabelText("Use through")).toBeNull();
     await waitFor(() =>
       expect(
-        within(card("Rope")).getByRole("button", { name: "Mark Rope unavailable" }),
+        within(card("Rope")).getByRole("button", { name: "Use it myself: Rope" }),
       ).toHaveFocus(),
     );
     expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(0);
   });
 
-  it("marks an item it holds available through its loan inventory", async () => {
+  it("gives back an item it uses through its loan inventory", async () => {
     const backend = liveBackend((state) => {
       state.items = [
         { ...AXE, inventories: [ADMIN_OF_CLIMBING], loan_status: "on_loan", borrowed_by_me: true },
@@ -337,10 +341,12 @@ describe("discover as an admin or owner", () => {
     await open();
     expect(card("Axe")).toHaveClass("unavailable");
 
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Mark Axe available" }));
+    const button = within(card("Axe")).getByRole("button", { name: "Done using it: Axe" });
+    expect(button).toHaveTextContent(/^Done using it$/);
+    fireEvent.click(button);
 
     expect(
-      await within(card("Axe")).findByRole("button", { name: "Mark Axe unavailable" }),
+      await within(card("Axe")).findByRole("button", { name: "Use it myself: Axe" }),
     ).toBeInTheDocument();
     await waitFor(() =>
       expect(within(card("Axe")).getByRole("heading", { name: "Axe" })).toHaveFocus(),
@@ -370,17 +376,17 @@ describe("discover as an admin or owner", () => {
     });
     await open();
 
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Mark Axe available" }));
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Done using it: Axe" }));
 
     expect(
-      await within(card("Stove")).findByRole("button", { name: "Request Stove" }),
+      await within(card("Stove")).findByRole("button", { name: "Ask to borrow Stove" }),
     ).toBeInTheDocument();
     await waitFor(() =>
       expect(within(card("Axe")).getByRole("heading", { name: "Axe" })).toHaveFocus(),
     );
   });
 
-  it("offers nothing on a loan the caller may not mark available", async () => {
+  it("offers nothing on a loan the caller may not give back", async () => {
     liveBackend((state) => {
       state.items = [
         { ...AXE, inventories: [ADMIN_OF_CLIMBING], loan_status: "on_loan", borrowed_by_me: true },
@@ -391,7 +397,7 @@ describe("discover as an admin or owner", () => {
 
     await open();
 
-    expect(within(card("Axe")).getByText("On loan to you")).toBeInTheDocument();
+    expect(within(card("Axe")).getByText("Borrowed by you")).toBeInTheDocument();
     expect(within(card("Axe")).queryByRole("button")).toBeNull();
   });
 });
