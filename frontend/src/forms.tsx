@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { apiFetch, readErrors, type FieldErrors } from "./api";
 
 interface FieldProps {
@@ -93,22 +93,47 @@ export function Confirmation({ message, confirm, onConfirm, onCancel }: Confirma
 }
 
 /**
+ * Orders the changes sent from one page. Each call marks a new change as the latest and
+ * returns a check that stays true until the next call, so a reply to an older change can
+ * leave out its messages instead of showing them over the newer one's.
+ */
+export function useLatestChange(): () => () => boolean {
+  const latest = useRef(0);
+  return useCallback(() => {
+    const id = ++latest.current;
+    return () => latest.current === id;
+  }, []);
+}
+
+/**
  * Holds a page's errors and `change`, which sends a change and reloads either way: a refusal
  * may come from a change someone else made, so the page shows the current state with it.
+ * `begin` clears the errors and starts a change for a form that sends its own request; it
+ * returns whether that change is still the page's latest. A reply to an older change sets
+ * no errors, but still reloads, since the change may have gone through.
  */
 export function useChange(reload: () => void) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  const start = useLatestChange();
+
+  function begin() {
+    setErrors({});
+    return start();
+  }
 
   async function change(path: string, method: "POST" | "DELETE", body?: unknown) {
-    setErrors({});
+    const isLatest = begin();
     try {
       const response = await apiFetch(path, { method, body });
-      if (!response.ok) setErrors(await readErrors(response, []));
+      if (!response.ok) {
+        const errors = await readErrors(response, []);
+        if (isLatest()) setErrors(errors);
+      }
       reload();
     } catch {
-      setErrors(unreachable());
+      if (isLatest()) setErrors(unreachable());
     }
   }
 
-  return { errors, setErrors, change };
+  return { errors, setErrors, change, begin };
 }

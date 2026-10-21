@@ -1,7 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import type { Connection, ConnectionRequests, ReceivedRequest, SentRequest } from "../connections";
-import { Confirmation, Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
+import {
+  Confirmation,
+  Field,
+  FormErrors,
+  unreachable,
+  useFocusFirstInvalid,
+  useLatestChange,
+} from "../forms";
 import { fullName, getJson } from "../inventories";
 import { useLoad } from "../load";
 import { formatPhoneNumber } from "../phone";
@@ -23,22 +30,28 @@ export default function ConnectionsPage() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [sendErrors, setSendErrors] = useState<FieldErrors>({});
   const [sent, setSent] = useState<string | null>(null);
+  const start = useLatestChange();
 
-  function clearMessages() {
+  /** Clears the messages and starts a change. Returns whether it is still the latest. */
+  function startChange() {
     setErrors({});
     setSendErrors({});
     setSent(null);
+    return start();
   }
 
   async function act(path: string, method: "POST" | "DELETE") {
-    clearMessages();
+    const isLatest = startChange();
     try {
       const response = await apiFetch(path, { method });
-      if (!response.ok) setErrors(await readErrors(response, []));
+      if (!response.ok) {
+        const errors = await readErrors(response, []);
+        if (isLatest()) setErrors(errors);
+      }
       // A refusal may come from a change the other user made; show the current state.
       reload();
     } catch {
-      setErrors(unreachable());
+      if (isLatest()) setErrors(unreachable());
     }
   }
 
@@ -82,7 +95,7 @@ export default function ConnectionsPage() {
       )}
       <SendRequest
         reload={reload}
-        onStart={clearMessages}
+        onStart={startChange}
         errors={sendErrors}
         setErrors={setSendErrors}
         sent={sent}
@@ -196,7 +209,8 @@ function RequestList<R extends { id: number }>({
 
 interface SendRequestProps {
   reload: () => void;
-  onStart: () => void;
+  /** Called when the form is submitted. Returns whether it is still the latest change. */
+  onStart: () => () => boolean;
   errors: FieldErrors;
   setErrors: (errors: FieldErrors) => void;
   sent: string | null;
@@ -209,27 +223,30 @@ function SendRequest({ reload, onStart, errors, setErrors, sent, onSent }: SendR
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    onStart();
+    const isLatest = onStart();
     try {
       const response = await apiFetch("/api/connections/", {
         method: "POST",
         body: { phone_number: new FormData(form).get("phone_number") },
       });
       if (!response.ok) {
-        setErrors(await readErrors(response, ["phone_number"]));
+        const errors = await readErrors(response, ["phone_number"]);
+        if (isLatest()) setErrors(errors);
         return;
       }
       const result = (await response.json()) as Connection | SentRequest;
-      setErrors({});
-      onSent(
-        result.status === "accepted"
-          ? `You are now connected with ${fullName(result.user)}.`
-          : `Request sent to ${formatPhoneNumber(result.user.phone_number)}.`,
-      );
+      if (isLatest()) {
+        setErrors({});
+        onSent(
+          result.status === "accepted"
+            ? `You are now connected with ${fullName(result.user)}.`
+            : `Request sent to ${formatPhoneNumber(result.user.phone_number)}.`,
+        );
+      }
       form.reset();
       reload();
     } catch {
-      setErrors(unreachable());
+      if (isLatest()) setErrors(unreachable());
     }
   }
 

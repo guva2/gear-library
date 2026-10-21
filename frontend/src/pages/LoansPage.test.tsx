@@ -1,8 +1,8 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { BorrowedItem, LendingItem } from "../items";
-import { ADA, empty, fakeBackend, json } from "../test-backend";
-import { renderAt } from "../test-render";
+import { ADA, empty, fakeBackend, held, json } from "../test-backend";
+import { expectLabelsInNames, renderAt } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
 
@@ -94,6 +94,10 @@ function region(name: string) {
   return screen.getByRole("region", { name });
 }
 
+function nameOf(button: HTMLElement) {
+  return button.getAttribute("aria-label");
+}
+
 function texts(name: string) {
   return within(region(name))
     .getAllByRole("listitem")
@@ -123,7 +127,7 @@ describe("waiting for your approval", () => {
       await open();
 
       const label = action === "approve" ? "Approve" : "Decline";
-      fireEvent.click(screen.getByRole("button", { name: `${label} request for Rope` }));
+      fireEvent.click(screen.getByRole("button", { name: `${label}: Rope` }));
 
       expect(
         await within(region("Waiting for your approval")).findByText("Nothing is waiting."),
@@ -153,7 +157,7 @@ describe("waiting for your approval", () => {
     }));
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Approve request for Rope" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve: Rope" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This request or loan changed. Try again.",
@@ -182,7 +186,7 @@ describe("lent out", () => {
     const backend = liveBackend(() => ({ [`POST ${path}`]: empty(204) }));
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: `Mark ${name} returned` }));
+    fireEvent.click(screen.getByRole("button", { name: `Mark returned: ${name}` }));
 
     await waitFor(() => expect(backend.requests(`POST ${path}`)).toEqual([{ borrower_id: 3 }]));
   });
@@ -242,7 +246,7 @@ describe("my requests and borrowed", () => {
     }));
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request for Stove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request: Stove" }));
 
     expect(
       await within(region("My requests")).findByText("You have no pending requests."),
@@ -258,7 +262,7 @@ describe("my requests and borrowed", () => {
     }));
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request for Stove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request: Stove" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This request was approved, so it cannot be cancelled.",
@@ -267,6 +271,19 @@ describe("my requests and borrowed", () => {
 });
 
 describe("loans page", () => {
+  it("names each button with its visible text, then the item", async () => {
+    liveBackend();
+
+    await open();
+
+    expectLabelsInNames(document.body);
+    expect(within(region("Lent out")).getAllByRole("button").map(nameOf)).toEqual([
+      "Mark returned: Axe",
+      "Mark returned: Cord",
+      "Mark returned: Lamp",
+    ]);
+  });
+
   it("says so in each section when there is nothing", async () => {
     liveBackend((state) => {
       state.lending = [];
@@ -299,5 +316,104 @@ describe("loans page", () => {
     renderAt("/loans");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your loans.");
+  });
+});
+
+describe("focus after an action", () => {
+  it.each([
+    [
+      "Approve: Rope",
+      "POST /api/inventories/7/items/20/approve/",
+      (state: State) => {
+        state.lending = state.lending.map((item) =>
+          item.id === ROPE.id ? { ...item, loan_status: "on_loan" } : item,
+        );
+      },
+    ],
+    [
+      "Decline: Rope",
+      "POST /api/inventories/7/items/20/decline/",
+      (state: State) => {
+        state.lending = state.lending.filter((item) => item.id !== ROPE.id);
+      },
+    ],
+    [
+      "Mark returned: Axe",
+      "POST /api/items/21/return/",
+      (state: State) => {
+        state.lending = state.lending.filter((item) => item.id !== AXE.id);
+      },
+    ],
+    [
+      "Cancel request: Stove",
+      "POST /api/borrowing/30/cancel/",
+      (state: State) => {
+        state.borrowed = state.borrowed.filter((item) => item.id !== STOVE.id);
+      },
+    ],
+    [
+      "Done using it: Bivy",
+      "POST /api/inventories/7/items/32/return/",
+      (state: State) => {
+        state.borrowed = state.borrowed.filter((item) => item.id !== BIVY.id);
+      },
+    ],
+  ])("moves focus to the page heading when %s removes the button", async (name, key, act) => {
+    liveBackend((state) => ({
+      [key]: () => {
+        act(state);
+        return empty(204)({});
+      },
+    }));
+    await open();
+    const button = screen.getByRole("button", { name });
+    button.focus();
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Loans" })).toHaveFocus());
+  });
+
+  it("leaves focus on the button when the item stays where it was", async () => {
+    const backend = liveBackend(() => ({
+      "POST /api/inventories/7/items/20/approve/": json(409, {
+        detail: "This request or loan changed. Try again.",
+      }),
+    }));
+    await open();
+    const button = screen.getByRole("button", { name: "Approve: Rope" });
+    button.focus();
+
+    fireEvent.click(button);
+
+    await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(backend.keys().filter((key) => key === "GET /api/lending/")).toHaveLength(2),
+    );
+    expect(button).toHaveFocus();
+  });
+});
+
+describe("two changes in flight", () => {
+  it("shows no message for the older change when its reply comes last", async () => {
+    const approve = held();
+    liveBackend((state) => ({
+      "POST /api/inventories/7/items/20/approve/": approve.route,
+      "POST /api/borrowing/30/cancel/": () => {
+        state.borrowed = state.borrowed.filter((item) => item.id !== STOVE.id);
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Approve: Rope" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request: Stove" }));
+    await within(region("My requests")).findByText("You have no pending requests.");
+
+    approve.respond(json(409, { detail: "This request or loan changed. Try again." }));
+
+    await waitFor(() => expect(texts("Waiting for your approval")).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

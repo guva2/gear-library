@@ -33,9 +33,12 @@ export interface FromState {
   from?: { pathname: string; search: string; hash: string };
 }
 
-export function RequireAuth({ children }: { children: ReactNode }) {
+/**
+ * Asks the backend who is logged in while `user` is `undefined`, and stores the answer.
+ * `failed` is true when the backend could not answer.
+ */
+function useSessionCheck() {
   const { user, setUser } = useAuth();
-  const location = useLocation();
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -58,11 +61,32 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     return () => controller.abort();
   }, [user, setUser]);
 
+  return { user, failed };
+}
+
+export function RequireAuth({ children }: { children: ReactNode }) {
+  const { user, failed } = useSessionCheck();
+  const location = useLocation();
+
   if (failed) return <p role="alert">Could not reach the backend.</p>;
   if (user === undefined) return <p>Loading…</p>;
   if (user === null) {
     const state: FromState = { from: location };
     return <Navigate to="/login" replace state={state} />;
   }
+  return children;
+}
+
+/**
+ * For the logged-out pages: sends a logged-in user to the page they were sent from, or to
+ * Discover. When the session check fails the page shows, since its own request reports an
+ * unreachable backend.
+ */
+export function RequireAnonymous({ children }: { children: ReactNode }) {
+  const { user, failed } = useSessionCheck();
+  const location = useLocation();
+
+  if (user) return <Navigate to={(location.state as FromState | null)?.from ?? "/"} replace />;
+  if (user === undefined && !failed) return <p>Loading…</p>;
   return children;
 }

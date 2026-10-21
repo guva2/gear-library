@@ -1,8 +1,8 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ADA, empty, fakeBackend, json } from "../test-backend";
+import { ADA, empty, fakeBackend, held, json } from "../test-backend";
 import type { ListedItem } from "../items";
-import { fillIn, renderAt } from "../test-render";
+import { expectLabelsInNames, fillIn, renderAt } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
 type Role = "member" | "admin" | "owner";
@@ -527,6 +527,50 @@ describe("as an owner", () => {
     expect(backend.requests(`PATCH ${URL}`)).toEqual([{ name: "Bouldering" }]);
   });
 
+  it("clears the rename errors when another change is sent from the page", async () => {
+    asRole("owner", {
+      [`PATCH ${URL}`]: json(400, { name: ["Ensure this field has no more than 32 characters."] }),
+      [`PATCH ${URL}members/3/`]: json(200, { ...MIA, role: "admin" }),
+    });
+    await open();
+    fillIn("New name", "x".repeat(33));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    await screen.findByText("Ensure this field has no more than 32 characters.");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Mia Lee" }), {
+      target: { value: "admin" },
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Ensure this field has no more than 32 characters.")).toBeNull(),
+    );
+    expect(screen.getByLabelText("New name")).toBeValid();
+  });
+
+  it("shows no message for an older change whose reply comes after a later one", async () => {
+    const remove = held();
+    const backend = asRole("owner", {
+      [`DELETE ${URL}members/2/`]: remove.route,
+      [`PATCH ${URL}members/3/`]: json(200, { ...MIA, role: "admin" }),
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Bob Stone" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Mia Lee" }), {
+      target: { value: "admin" },
+    });
+    await waitFor(() =>
+      expect(backend.keys().filter((key) => key === `GET ${URL}`)).toHaveLength(2),
+    );
+
+    remove.respond(json(409, { detail: "Bob has items on loan here." }));
+
+    await waitFor(() =>
+      expect(backend.keys().filter((key) => key === `GET ${URL}`)).toHaveLength(3),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Bob has items on loan here.")).toBeNull();
+  });
+
   it("deletes the inventory only after confirming, then goes home", async () => {
     const backend = asRole("owner", { [`DELETE ${URL}`]: empty(204) });
     await open();
@@ -828,7 +872,8 @@ describe("borrowing", () => {
       fireEvent.click(screen.getByRole("button", { name: "Ask to borrow Rope" }));
 
       expect(await within(itemFor("Rope")).findByText("Waiting for approval")).toBeVisible();
-      expect(buttonNames()).toEqual(["Cancel request for Rope"]);
+      expect(buttonNames()).toEqual(["Cancel request: Rope"]);
+      expectLabelsInNames(region("Items"));
       expect(backend.requests(`POST ${URL}items/20/borrow/`)).toEqual([undefined]);
     });
 
@@ -842,7 +887,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Cancel request for Rope" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel request: Rope" }));
 
       expect(await within(itemFor("Rope")).findByText("Available")).toBeVisible();
       expect(backend.requests("POST /api/borrowing/20/cancel/")).toEqual([undefined]);
@@ -893,15 +938,16 @@ describe("borrowing", () => {
       expect(stove.getByText(`On loan to Mia Lee, ${MIAS_PHONE}`)).toBeVisible();
       expect(within(itemFor("Lamp")).getByText("On loan")).toBeVisible();
       expect(buttonNames()).toEqual([
-        "Mark Stove returned",
-        "Approve request for Tent",
-        "Decline request for Tent",
+        "Mark returned: Stove",
+        "Approve: Tent",
+        "Decline: Tent",
       ]);
+      expectLabelsInNames(region("Items"));
     });
 
     it.each([
-      ["Approve request for Tent", "approve", "on_loan"],
-      ["Decline request for Tent", "decline", "available"],
+      ["Approve: Tent", "approve", "on_loan"],
+      ["Decline: Tent", "decline", "available"],
     ] as const)("%s sends the requester it showed and reloads", async (button, action, after) => {
       let tent: ListedItem = { ...TENT, ...THROUGH_HERE };
       const backend = withListed("admin", () => [tent], {
@@ -930,7 +976,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Mark Stove returned" }));
+      fireEvent.click(screen.getByRole("button", { name: "Mark returned: Stove" }));
 
       expect(await within(itemFor("Stove")).findByText("Available")).toBeVisible();
       expect(backend.requests(`POST ${URL}items/22/return/`)).toEqual([{ borrower_id: MIA.id }]);
@@ -944,7 +990,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Approve request for Tent" }));
+      fireEvent.click(screen.getByRole("button", { name: "Approve: Tent" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "This request or loan changed. Try again.",
@@ -965,7 +1011,7 @@ describe("borrowing", () => {
       expect(within(itemFor("Tent")).getByText("Waiting for approval")).toBeVisible();
       expect(within(itemFor("Stove")).getByText("In use by you")).toBeVisible();
       expect(within(itemFor("Lamp")).getByText("Borrowed by you")).toBeVisible();
-      expect(buttonNames()).toEqual(["Done using it: Stove", "Cancel request for Tent"]);
+      expect(buttonNames()).toEqual(["Done using it: Stove", "Cancel request: Tent"]);
     });
 
     it("says In use by you for a use through another inventory, Borrowed by you for a loan", async () => {

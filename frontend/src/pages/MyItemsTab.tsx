@@ -40,7 +40,7 @@ function loanState(item: Item, userId: number | undefined): string {
 /** Every item the signed-in user owns, listed or not. */
 export default function MyItemsTab() {
   const [page, reload] = useLoad((signal) => getJson<Item[]>("/api/items/", signal));
-  const { errors, setErrors, change } = useChange(reload);
+  const { errors, setErrors, change, begin } = useChange(reload);
 
   return (
     <>
@@ -51,9 +51,9 @@ export default function MyItemsTab() {
         <ItemList
           items={page.data}
           reload={reload}
-          onSubmit={() => setErrors({})}
+          onSubmit={begin}
           onGone={(errors) => {
-            setErrors(errors);
+            if (errors) setErrors(errors);
             reload();
           }}
           onDelete={(item) => change(`/api/items/${item.id}/`, "DELETE")}
@@ -63,7 +63,7 @@ export default function MyItemsTab() {
           onUse={(item) => change(`/api/items/${item.id}/use/`, "POST")}
         />
       )}
-      <AddItem reload={reload} onSubmit={() => setErrors({})} />
+      <AddItem reload={reload} onSubmit={begin} />
     </>
   );
 }
@@ -71,10 +71,13 @@ export default function MyItemsTab() {
 interface ItemListProps {
   items: Item[];
   reload: () => void;
-  /** Called when an edit is submitted. */
-  onSubmit: () => void;
-  /** Called with the errors of an edit refused because the item no longer exists. */
-  onGone: (errors: FieldErrors) => void;
+  /** Called when an edit is submitted. Returns whether the edit is still the latest change. */
+  onSubmit: () => () => boolean;
+  /**
+   * Called when an edit was refused because the item no longer exists, with its errors, or
+   * `null` when a later change was sent meanwhile.
+   */
+  onGone: (errors: FieldErrors | null) => void;
   onDelete: (item: Item) => void;
   /** Called with the borrower the page showed. */
   onReturn: (item: Item, borrowerId: number) => void;
@@ -208,7 +211,7 @@ function LoanButton({ item, inUse, onReturn, onUse }: LoanButtonProps) {
     const run = () => onReturn(item, borrower.id);
     action = inUse
       ? { label: "Done using it", name: `Done using it: ${item.name}`, run }
-      : { label: "Mark returned", name: `Mark ${item.name} returned`, run };
+      : { label: "Mark returned", name: `Mark returned: ${item.name}`, run };
   } else {
     return null;
   }
@@ -221,9 +224,9 @@ function LoanButton({ item, inUse, onReturn, onUse }: LoanButtonProps) {
 
 interface EditItemProps {
   item: Item;
-  onSubmit: () => void;
+  onSubmit: () => () => boolean;
   onSaved: () => void;
-  onGone: (errors: FieldErrors) => void;
+  onGone: (errors: FieldErrors | null) => void;
   onCancel: () => void;
 }
 
@@ -237,17 +240,22 @@ function EditItem({ item, onSubmit, onSaved, onGone, onCancel }: EditItemProps) 
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSubmit();
+    const isLatest = onSubmit();
     try {
       const response = await apiFetch(`/api/items/${item.id}/`, {
         method: "PATCH",
         body: itemFields(event.currentTarget),
       });
       if (response.ok) onSaved();
-      else if (response.status === 404) onGone(await readErrors(response, []));
-      else setErrors(await readErrors(response, FIELDS));
+      else if (response.status === 404) {
+        const errors = await readErrors(response, []);
+        onGone(isLatest() ? errors : null);
+      } else {
+        const errors = await readErrors(response, FIELDS);
+        if (isLatest()) setErrors(errors);
+      }
     } catch {
-      setErrors(unreachable());
+      if (isLatest()) setErrors(unreachable());
     }
   }
 
@@ -274,25 +282,32 @@ function EditItem({ item, onSubmit, onSaved, onGone, onCancel }: EditItemProps) 
   );
 }
 
-function AddItem({ reload, onSubmit }: { reload: () => void; onSubmit: () => void }) {
+interface AddItemProps {
+  reload: () => void;
+  /** Called when the form is submitted. Returns whether it is still the latest change. */
+  onSubmit: () => () => boolean;
+}
+
+function AddItem({ reload, onSubmit }: AddItemProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    onSubmit();
+    const isLatest = onSubmit();
     try {
       const response = await apiFetch("/api/items/", { method: "POST", body: itemFields(form) });
       if (!response.ok) {
-        setErrors(await readErrors(response, FIELDS));
+        const errors = await readErrors(response, FIELDS);
+        if (isLatest()) setErrors(errors);
         return;
       }
       setErrors({});
       form.reset();
       reload();
     } catch {
-      setErrors(unreachable());
+      if (isLatest()) setErrors(unreachable());
     }
   }
 

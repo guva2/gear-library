@@ -23,6 +23,14 @@ export function empty(status: number): Handler {
   return () => new Response(null, { status });
 }
 
+/** A route that answers only when `respond` is called, to hold a request in flight. */
+export function held() {
+  let respond: (handler: Handler) => void = () => {};
+  const route: Route = (init) =>
+    new Promise<Response>((resolve) => (respond = (handler) => resolve(handler(init))));
+  return { route, respond: (handler: Handler) => respond(handler) };
+}
+
 // A signed-in user with no inventories, invites, connections, requests, items, loans or
 // items to discover.
 const DEFAULTS: Record<string, Handler> = {

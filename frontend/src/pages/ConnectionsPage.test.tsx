@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ADA, empty, fakeBackend, json } from "../test-backend";
-import { fillIn, renderAt } from "../test-render";
+import { ADA, empty, fakeBackend, held, json } from "../test-backend";
+import { fillIn, renderAt, settle } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
 
@@ -375,6 +375,73 @@ describe("sending a request", () => {
     const form = screen.getByRole("button", { name: "Send request" }).closest("form")!;
     expect(await within(form).findByRole("alert")).toHaveTextContent(
       "You are already connected.",
+    );
+  });
+});
+
+describe("two changes in flight", () => {
+  it("does not say a request was sent when a later change was made meanwhile", async () => {
+    const MIA = { id: 13, status: "pending", user: { phone_number: "5552340007" } };
+    const request = held();
+    liveBackend((state) => ({
+      "POST /api/connections/": request.route,
+      "POST /api/connections/11/decline/": () => {
+        state.received = [];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fillIn("Phone number", "(555) 234-0007");
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline request from Cy Young" }));
+    await screen.findByText("No requests received.");
+
+    request.respond(() => json(201, MIA)({}));
+
+    await waitFor(() => expect(screen.getByLabelText("Phone number")).toHaveValue(""));
+    expect(inMain().queryByRole("status")).toBeNull();
+  });
+
+  it("shows no error from a refused request change that arrives after a later change", async () => {
+    const decline = held();
+    liveBackend((state) => ({
+      "POST /api/connections/11/decline/": decline.route,
+      "POST /api/connections/12/cancel/": () => {
+        state.sent = [];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Decline request from Cy Young" }));
+    fireEvent.click(screen.getByRole("button", { name: /Cancel request to/ }));
+    await screen.findByText("No requests sent.");
+
+    decline.respond(json(404, { detail: "Request not found." }));
+    await settle();
+
+    expect(inMain().queryByRole("alert")).toBeNull();
+  });
+
+  it("shows no send error from a reply that arrives after a later change", async () => {
+    const send = held();
+    liveBackend((state) => ({
+      "POST /api/connections/": send.route,
+      "POST /api/connections/11/decline/": () => {
+        state.received = [];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fillIn("Phone number", "(555) 234-0007");
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline request from Cy Young" }));
+    await screen.findByText("No requests received.");
+
+    send.respond(json(400, { phone_number: ["No user has this phone number."] }));
+    await settle();
+
+    expect(screen.getByLabelText("Phone number")).not.toHaveAccessibleDescription(
+      "No user has this phone number.",
     );
   });
 });

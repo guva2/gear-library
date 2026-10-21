@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { expect } from "vitest";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router";
 import { AppRoutes } from "./App";
 
@@ -25,4 +26,19 @@ export function renderAt(path: string) {
 
 export function fillIn(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
+
+/** Each button's accessible name starts with its visible text (WCAG 2.5.3, label in name). */
+export function expectLabelsInNames(container: HTMLElement) {
+  const buttons = within(container).getAllByRole("button");
+  const names = buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent);
+  const prefixes = buttons.map((button, index) =>
+    names[index]?.slice(0, button.textContent?.length),
+  );
+  expect(prefixes).toEqual(buttons.map((button) => button.textContent));
+}
+
+/** Lets replies already answered finish, for a test that checks nothing changed. */
+export function settle() {
+  return act(() => new Promise<void>((resolve) => setTimeout(resolve, 30)));
 }
