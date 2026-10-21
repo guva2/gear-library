@@ -456,12 +456,6 @@ gets `403` `{"detail": "Only owners can remove other people's items."}`. An item
 not listed in the inventory is a `404`
 `{"detail": "This item is not listed in this inventory."}`.
 
-## Search (M8)
-
-| Method | Path | Who | Main errors |
-|---|---|---|---|
-| `GET` | `/api/search/?q=` | Logged in. Items listed in the caller's inventories. | `400`: no query. |
-
 ## Borrowing (M9)
 
 Borrowing is done through one inventory, the item's loan inventory. A `member` makes a
@@ -557,7 +551,7 @@ No body. Cancels the caller's pending request.
 
 | Method | Path | Who | Main errors |
 |---|---|---|---|
-| `GET` | `/api/discover/` | Logged in. Items the caller can only borrow. | |
+| `GET` | `/api/discover/?q=` | Logged in. Items the caller can only borrow. `q` is optional and searches them. | |
 | `GET` | `/api/lending/` | Logged in. Requests and loans the caller may answer or close. | |
 
 Both count only the inventories where the caller is an active member: a pending invite
@@ -568,7 +562,8 @@ adds nothing.
 What `GET /api/discover/` returns: every item listed in at least one inventory where the
 caller is a `member`, and in none where the caller is an admin or owner, apart from the
 caller's own items. Each item appears once however many of those inventories list it.
-Available items come first, then the rest; each group is sorted by name.
+Available items come first, then the rest; each group is sorted by name. A search orders
+each group differently: see [Searching Discover](#searching-discover-m8).
 
 | Field | Type | |
 |---|---|---|
@@ -582,6 +577,23 @@ Available items come first, then the rest; each group is sorted by name.
 
 As for a `member` in a [Listed item](#listed-item), the requester or borrower is never
 shown.
+
+### Searching Discover (M8)
+
+`GET /api/discover/?q=tent` returns the Discover items that match `q`, in the same
+[Discover item](#discover-item) form. A missing `q`, or one shorter than 2 characters
+after stripping spaces, returns the full list. A `q` containing a NUL character (`%00`)
+returns `400` with `{"q": ["Cannot contain a NUL character."]}`.
+
+- Matching uses Postgres `pg_trgm` word similarity: how well `q` matches the closest
+  part of the text, so a partial word ("sleep" finds "Sleeping bag") and a dropped or
+  doubled letter ("climing", "hamock") match. Swapped letters ("tnet") do not.
+- An item matches when its name has a word similarity of 0.5 or more to `q`, or its
+  description has 0.6 or more.
+- Only letters and digits count. `%` and `_` have no special meaning.
+- Order: available items first, then the rest. Within each group, by the name's word
+  similarity, then the description's, then the similarity of `q` to the whole name, then
+  by name.
 
 ### Lending item
 

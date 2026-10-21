@@ -6,10 +6,14 @@ export type Loaded<T> =
   | { status: "error"; error: unknown };
 
 /**
- * Runs `load` on mount and again on each call of the returned `reload`. A reload keeps the
- * previous result on screen until the new one arrives.
+ * Runs `load` on mount, again on each call of the returned `reload`, and again when `key`
+ * changes. A reload keeps the previous result on screen until the new one arrives. Starting
+ * a load aborts the one in flight, and the result of an aborted load is dropped.
  */
-export function useLoad<T>(load: (signal: AbortSignal) => Promise<T>): [Loaded<T>, () => void] {
+export function useLoad<T>(
+  load: (signal: AbortSignal) => Promise<T>,
+  key?: unknown,
+): [Loaded<T>, () => void] {
   const [state, setState] = useState<Loaded<T>>({ status: "loading" });
   const [version, setVersion] = useState(0);
 
@@ -24,8 +28,8 @@ export function useLoad<T>(load: (signal: AbortSignal) => Promise<T>): [Loaded<T
       },
     );
     return () => controller.abort();
-    // `load` is read from the render that changed `version`, so it is current.
-  }, [version]);
+    // `load` is read from the render that changed `version` or `key`, so it is current.
+  }, [version, key]);
 
   return [state, () => setVersion((v) => v + 1)];
 }
