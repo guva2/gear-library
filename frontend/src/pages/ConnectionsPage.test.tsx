@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ADA, empty, fakeBackend, json } from "../test-backend";
-import { fillIn, renderAt } from "../test-render";
+import { ADA, empty, fakeBackend, held, json } from "../test-backend";
+import { fillIn, renderAt, settle } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
 
@@ -10,10 +10,10 @@ const PHONE_NUMBER = /\(?[0-9]{3}\)? ?[0-9]{3}-?[0-9]{4}/;
 const WITH_BOB = {
   id: 10,
   status: "accepted",
-  user: { id: 2, first_name: "Bob", last_name: "Stone", phone_number: "5551230002" },
+  user: { id: 2, first_name: "Bob", last_name: "Stone", phone_number: "5552230002" },
 };
 const FROM_CY = { id: 11, status: "pending", user: { first_name: "Cy", last_name: "Young" } };
-const TO_DEE = { id: 12, status: "pending", user: { phone_number: "5551230004" } };
+const TO_DEE = { id: 12, status: "pending", user: { phone_number: "5552230004" } };
 
 function signedIn(routes: Routes = {}) {
   return fakeBackend({ "GET /api/auth/me/": json(200, ADA), ...routes });
@@ -63,9 +63,9 @@ describe("my connections", () => {
 
     await open();
 
-    expect(items("Connections")).toEqual(["Bob Stone, (555) 123-0002"]);
+    expect(items("Connections")).toEqual(["Bob Stone, (555) 223-0002"]);
     expect(items("Requests received")).toEqual(["Cy Young"]);
-    expect(items("Requests sent")).toEqual(["(555) 123-0004"]);
+    expect(items("Requests sent")).toEqual(["(555) 223-0004"]);
     expect(region("Requests received").textContent).not.toMatch(PHONE_NUMBER);
     expect(region("Requests sent").textContent).not.toMatch(/Dee|Ford/);
   });
@@ -155,7 +155,7 @@ describe("answering requests", () => {
     const CY = {
       id: 11,
       status: "accepted",
-      user: { id: 3, first_name: "Cy", last_name: "Young", phone_number: "5551230003" },
+      user: { id: 3, first_name: "Cy", last_name: "Young", phone_number: "5552230003" },
     };
     const backend = liveBackend((state) => ({
       "POST /api/connections/11/accept/": () => {
@@ -170,8 +170,8 @@ describe("answering requests", () => {
 
     expect(await screen.findByText("No requests received.")).toBeInTheDocument();
     expect(items("Connections")).toEqual([
-      "Bob Stone, (555) 123-0002",
-      "Cy Young, (555) 123-0003",
+      "Bob Stone, (555) 223-0002",
+      "Cy Young, (555) 223-0003",
     ]);
     expect(backend.requests("POST /api/connections/11/accept/")).toHaveLength(1);
   });
@@ -200,7 +200,7 @@ describe("answering requests", () => {
     }));
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request to (555) 123-0004" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request to (555) 223-0004" }));
 
     expect(await screen.findByText("No requests sent.")).toBeInTheDocument();
     expect(backend.requests("POST /api/connections/12/cancel/")).toHaveLength(1);
@@ -217,15 +217,15 @@ describe("answering requests", () => {
     }));
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request to (555) 123-0004" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request to (555) 223-0004" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("This is not a pending request.");
     await waitFor(() => expect(items("Requests sent")).toEqual([]));
-    expect(items("Connections")).toContain("Dee Ford, (555) 123-0002");
+    expect(items("Connections")).toContain("Dee Ford, (555) 223-0002");
   });
 
   it("clears a refusal when a request is sent", async () => {
-    const MIA = { id: 13, status: "pending", user: { phone_number: "5551230007" } };
+    const MIA = { id: 13, status: "pending", user: { phone_number: "5552230007" } };
     liveBackend((state) => ({
       "POST /api/connections/11/decline/": json(409, { detail: "This is not a pending request." }),
       "POST /api/connections/": () => {
@@ -237,7 +237,7 @@ describe("answering requests", () => {
     fireEvent.click(screen.getByRole("button", { name: "Decline request from Cy Young" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("This is not a pending request.");
 
-    fillIn("Phone number", "5551230007");
+    fillIn("Phone number", "5552230007");
     fireEvent.click(screen.getByRole("button", { name: "Send request" }));
 
     expect(await inMain().findByRole("status")).toBeInTheDocument();
@@ -250,11 +250,11 @@ describe("answering requests", () => {
       "POST /api/connections/12/cancel/": json(204, null),
     }));
     await open();
-    fillIn("Phone number", "5551230004");
+    fillIn("Phone number", "5552230004");
     fireEvent.click(screen.getByRole("button", { name: "Send request" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("already sent");
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request to (555) 123-0004" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request to (555) 223-0004" }));
 
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
@@ -280,7 +280,7 @@ describe("sending a request", () => {
   }
 
   it("sends the number, repeats it back and lists the request", async () => {
-    const MIA = { id: 13, status: "pending", user: { phone_number: "5551230007" } };
+    const MIA = { id: 13, status: "pending", user: { phone_number: "5552230007" } };
     const backend = liveBackend((state) => ({
       "POST /api/connections/": () => {
         state.sent = [TO_DEE, MIA];
@@ -289,20 +289,20 @@ describe("sending a request", () => {
     }));
     await open();
 
-    await send("(555) 123-0007");
+    await send("(555) 223-0007");
 
     expect(await inMain().findByRole("status")).toHaveTextContent(
-      "Request sent to (555) 123-0007.",
+      "Request sent to (555) 223-0007.",
     );
-    await waitFor(() => expect(items("Requests sent")).toEqual(["(555) 123-0004", "(555) 123-0007"]));
+    await waitFor(() => expect(items("Requests sent")).toEqual(["(555) 223-0004", "(555) 223-0007"]));
     expect(backend.requests("POST /api/connections/")).toEqual([
-      { phone_number: "(555) 123-0007" },
+      { phone_number: "(555) 223-0007" },
     ]);
     expect(screen.getByLabelText("Phone number")).toHaveValue("");
   });
 
   it("stops saying the request was sent once another action runs", async () => {
-    const MIA = { id: 13, status: "pending", user: { phone_number: "5551230007" } };
+    const MIA = { id: 13, status: "pending", user: { phone_number: "5552230007" } };
     liveBackend((state) => ({
       "POST /api/connections/": () => {
         state.sent = [TO_DEE, MIA];
@@ -314,14 +314,14 @@ describe("sending a request", () => {
       },
     }));
     await open();
-    await send("5551230007");
+    await send("5552230007");
     expect(await inMain().findByRole("status")).toHaveTextContent(
-      "Request sent to (555) 123-0007.",
+      "Request sent to (555) 223-0007.",
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel request to (555) 123-0007" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel request to (555) 223-0007" }));
 
-    await waitFor(() => expect(items("Requests sent")).toEqual(["(555) 123-0004"]));
+    await waitFor(() => expect(items("Requests sent")).toEqual(["(555) 223-0004"]));
     expect(inMain().queryByRole("status")).not.toBeInTheDocument();
   });
 
@@ -329,7 +329,7 @@ describe("sending a request", () => {
     const CY = {
       id: 11,
       status: "accepted",
-      user: { id: 3, first_name: "Cy", last_name: "Young", phone_number: "5551230003" },
+      user: { id: 3, first_name: "Cy", last_name: "Young", phone_number: "5552230003" },
     };
     liveBackend((state) => ({
       "POST /api/connections/": () => {
@@ -340,7 +340,7 @@ describe("sending a request", () => {
     }));
     await open();
 
-    await send("5551230003");
+    await send("5552230003");
 
     expect(await inMain().findByRole("status")).toHaveTextContent(
       "You are now connected with Cy Young.",
@@ -370,11 +370,78 @@ describe("sending a request", () => {
     });
     await open();
 
-    await send("5551230002");
+    await send("5552230002");
 
     const form = screen.getByRole("button", { name: "Send request" }).closest("form")!;
     expect(await within(form).findByRole("alert")).toHaveTextContent(
       "You are already connected.",
+    );
+  });
+});
+
+describe("two changes in flight", () => {
+  it("does not say a request was sent when a later change was made meanwhile", async () => {
+    const MIA = { id: 13, status: "pending", user: { phone_number: "5552340007" } };
+    const request = held();
+    liveBackend((state) => ({
+      "POST /api/connections/": request.route,
+      "POST /api/connections/11/decline/": () => {
+        state.received = [];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fillIn("Phone number", "(555) 234-0007");
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline request from Cy Young" }));
+    await screen.findByText("No requests received.");
+
+    request.respond(() => json(201, MIA)({}));
+
+    await waitFor(() => expect(screen.getByLabelText("Phone number")).toHaveValue(""));
+    expect(inMain().queryByRole("status")).toBeNull();
+  });
+
+  it("shows no error from a refused request change that arrives after a later change", async () => {
+    const decline = held();
+    liveBackend((state) => ({
+      "POST /api/connections/11/decline/": decline.route,
+      "POST /api/connections/12/cancel/": () => {
+        state.sent = [];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Decline request from Cy Young" }));
+    fireEvent.click(screen.getByRole("button", { name: /Cancel request to/ }));
+    await screen.findByText("No requests sent.");
+
+    decline.respond(json(404, { detail: "Request not found." }));
+    await settle();
+
+    expect(inMain().queryByRole("alert")).toBeNull();
+  });
+
+  it("shows no send error from a reply that arrives after a later change", async () => {
+    const send = held();
+    liveBackend((state) => ({
+      "POST /api/connections/": send.route,
+      "POST /api/connections/11/decline/": () => {
+        state.received = [];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fillIn("Phone number", "(555) 234-0007");
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline request from Cy Young" }));
+    await screen.findByText("No requests received.");
+
+    send.respond(json(400, { phone_number: ["No user has this phone number."] }));
+    await settle();
+
+    expect(screen.getByLabelText("Phone number")).not.toHaveAccessibleDescription(
+      "No user has this phone number.",
     );
   });
 });

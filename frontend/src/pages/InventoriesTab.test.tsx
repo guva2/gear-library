@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ADA, empty, fakeBackend, json } from "../test-backend";
-import { fillIn, renderAt } from "../test-render";
+import { ADA, empty, fakeBackend, held, json } from "../test-backend";
+import { fillIn, renderAt, settle } from "../test-render";
 
 const CLIMBING = { id: 7, name: "Climbing Club", role: "owner" };
 const CAMPING = { id: 8, name: "Camping Crew", role: "member" };
@@ -146,5 +146,92 @@ describe("pending invites", () => {
     expect(await within(section("Invites")).findByRole("alert")).toHaveTextContent(
       "Invite not found.",
     );
+  });
+});
+
+describe("form errors", () => {
+  it("clears the create form's errors when an invite is answered", async () => {
+    signedIn({
+      "GET /api/invites/": json(200, [INVITE]),
+      "POST /api/inventories/": json(400, { name: ["This field is required."] }),
+      "POST /api/invites/30/decline/": empty(204),
+    });
+    renderAt("/manage/inventories");
+    await screen.findByText("You are not in any inventory yet.");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    const name = screen.getByLabelText("Inventory name");
+    await waitFor(() => expect(name).toHaveAccessibleDescription("This field is required."));
+
+    fireEvent.click(screen.getByRole("button", { name: "Decline invite to Camping Crew" }));
+
+    await waitFor(() => expect(name).not.toHaveAccessibleDescription());
+    expect(within(section("My inventories")).queryByRole("alert")).toBeNull();
+  });
+
+  it("clears an invite refusal when an inventory is created", async () => {
+    signedIn({
+      "GET /api/invites/": json(200, [INVITE]),
+      "POST /api/invites/30/accept/": json(404, { detail: "Invite not found." }),
+      "POST /api/inventories/": json(400, { name: ["This field is required."] }),
+    });
+    renderAt("/manage/inventories");
+    fireEvent.click(await screen.findByRole("button", { name: "Accept invite to Camping Crew" }));
+    expect(await within(section("Invites")).findByRole("alert")).toHaveTextContent(
+      "Invite not found.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Inventory name")).toHaveAccessibleDescription(
+        "This field is required.",
+      ),
+    );
+    expect(within(section("Invites")).queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("two changes in flight", () => {
+  const SECOND_INVITE = { ...INVITE, id: 31 };
+
+  it("shows no invite error from a reply that arrives after a later change", async () => {
+    const accept = held();
+    const backend = signedIn({
+      "GET /api/invites/": json(200, [INVITE, SECOND_INVITE]),
+      "POST /api/invites/30/accept/": accept.route,
+      "POST /api/invites/31/decline/": empty(204),
+    });
+    renderAt("/manage/inventories");
+    const accepts = await screen.findAllByRole("button", { name: "Accept invite to Camping Crew" });
+    fireEvent.click(accepts[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Decline invite to Camping Crew" })[1]!);
+    await waitFor(() => expect(backend.requests("POST /api/invites/31/decline/")).toHaveLength(1));
+
+    accept.respond(json(404, { detail: "Invite not found." }));
+    await waitFor(() => expect(backend.requests("GET /api/invites/")).toHaveLength(3));
+    await settle();
+
+    expect(within(section("Invites")).queryByRole("alert")).toBeNull();
+  });
+
+  it("stays on the page when an inventory is created after a later change", async () => {
+    const create = held();
+    const backend = signedIn({
+      "GET /api/invites/": json(200, [INVITE]),
+      "POST /api/inventories/": create.route,
+      "POST /api/invites/30/decline/": empty(204),
+    });
+    const { location } = renderAt("/manage/inventories");
+    await screen.findByText("You are not in any inventory yet.");
+    fillIn("Inventory name", "Kayaks");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline invite to Camping Crew" }));
+    await waitFor(() => expect(backend.requests("POST /api/invites/30/decline/")).toHaveLength(1));
+
+    create.respond(json(201, { id: 9, name: "Kayaks", role: "owner" }));
+    await waitFor(() => expect(backend.requests("GET /api/inventories/")).toHaveLength(3));
+    await settle();
+
+    expect(location().path).toBe("/manage/inventories");
   });
 });

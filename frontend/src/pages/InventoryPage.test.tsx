@@ -1,8 +1,8 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ADA, empty, fakeBackend, json } from "../test-backend";
+import { ADA, empty, fakeBackend, held, json } from "../test-backend";
 import type { ListedItem } from "../items";
-import { fillIn, renderAt } from "../test-render";
+import { expectLabelsInNames, fillIn, renderAt } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
 type Role = "member" | "admin" | "owner";
@@ -12,11 +12,11 @@ const URL = "/api/inventories/7/";
 const AVAILABLE = { loan_status: "available", borrowed_by_me: false, borrower: null } as const;
 const PHONE_NUMBER = /\(?[0-9]{3}\)? ?[0-9]{3}-?[0-9]{4}/;
 
-const BOB = { id: 2, first_name: "Bob", last_name: "Stone", phone_number: "5551230002" };
-const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5551230003" };
+const BOB = { id: 2, first_name: "Bob", last_name: "Stone", phone_number: "5552230002" };
+const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5552230003" };
 const INVITE = {
   id: 40,
-  invitee: { phone_number: "5551230004" },
+  invitee: { phone_number: "5552230004" },
   invited_by: { first_name: "Bob", last_name: "Stone" },
 };
 
@@ -24,9 +24,9 @@ const INVITE = {
 // Dee and Eve can be invited.
 const CONNECTIONS = [
   BOB,
-  { id: 4, first_name: "Cal", last_name: "Reyes", phone_number: "5551230004" },
-  { id: 5, first_name: "Dee", last_name: "Park", phone_number: "5551230005" },
-  { id: 6, first_name: "Eve", last_name: "Moss", phone_number: "5551230006" },
+  { id: 4, first_name: "Cal", last_name: "Reyes", phone_number: "5552230004" },
+  { id: 5, first_name: "Dee", last_name: "Park", phone_number: "5552230005" },
+  { id: 6, first_name: "Eve", last_name: "Moss", phone_number: "5552230006" },
 ].map((user) => ({ id: 100 + user.id, status: "accepted", user }));
 
 function members(role: Role) {
@@ -68,7 +68,7 @@ function region(name: string) {
 describe("as a member", () => {
   // Names only. The extra phone number checks that the page renders nothing but names.
   const NAMES = [
-    { first_name: "Olive", last_name: "Grant", phone_number: "5551230009" },
+    { first_name: "Olive", last_name: "Grant", phone_number: "5552230009" },
     { first_name: "Bob", last_name: "Stone" },
   ];
 
@@ -108,12 +108,12 @@ describe("as an admin", () => {
 
     const rows = within(region("Members")).getAllByRole("row").slice(1);
     expect(rows.map((row) => row.textContent)).toEqual([
-      "Ada Lovelace(555) 123-4567admin",
-      "Bob Stone(555) 123-0002admin",
-      "Mia Lee(555) 123-0003member",
+      "Ada Lovelace(555) 223-4567admin",
+      "Bob Stone(555) 223-0002admin",
+      "Mia Lee(555) 223-0003member",
     ]);
-    expect(within(region("Pending invites")).getByText(/123-0004/)).toHaveTextContent(
-      "(555) 123-0004, invited by Bob Stone",
+    expect(within(region("Pending invites")).getByText(/223-0004/)).toHaveTextContent(
+      "(555) 223-0004, invited by Bob Stone",
     );
   });
 
@@ -144,13 +144,13 @@ describe("as an admin", () => {
 
     const picker = screen.getByRole("combobox", { name: "Connection" });
     expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Dee Park, (555) 123-0005",
-      "Eve Moss, (555) 123-0006",
+      "Dee Park, (555) 223-0005",
+      "Eve Moss, (555) 223-0006",
     ]);
   });
 
   it("invites the chosen connection and reloads the invites and the picker", async () => {
-    const EVE_INVITE = { ...INVITE, id: 41, invitee: { phone_number: "5551230006" } };
+    const EVE_INVITE = { ...INVITE, id: 41, invitee: { phone_number: "5552230006" } };
     let invites = [INVITE];
     const backend = asRole("admin", {
       [`GET ${URL}invites/`]: () => json(200, invites)({}),
@@ -172,7 +172,7 @@ describe("as an admin", () => {
     expect(backend.requests(`POST ${URL}invites/`)).toEqual([{ user_id: 6 }]);
     const picker = screen.getByRole("combobox", { name: "Connection" });
     expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Dee Park, (555) 123-0005",
+      "Dee Park, (555) 223-0005",
     ]);
   });
 
@@ -232,7 +232,7 @@ describe("as an admin", () => {
     await waitFor(() => expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull());
   });
 
-  const DEE_INVITE = { ...INVITE, id: 42, invitee: { phone_number: "5551230005" } };
+  const DEE_INVITE = { ...INVITE, id: 42, invitee: { phone_number: "5552230005" } };
 
   it("names the conflicting connection in the section alert after it leaves the picker", async () => {
     let invites = [INVITE];
@@ -359,7 +359,7 @@ describe("as an admin", () => {
     });
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Revoke invite for (555) 123-0004" }));
+    fireEvent.click(screen.getByRole("button", { name: "Revoke invite for (555) 223-0004" }));
 
     expect(await screen.findByText("No pending invites.")).toBeInTheDocument();
     expect(backend.requests("POST /api/invites/40/revoke/")).toHaveLength(1);
@@ -525,6 +525,50 @@ describe("as an owner", () => {
 
     expect(await screen.findByRole("heading", { name: "Bouldering" })).toBeInTheDocument();
     expect(backend.requests(`PATCH ${URL}`)).toEqual([{ name: "Bouldering" }]);
+  });
+
+  it("clears the rename errors when another change is sent from the page", async () => {
+    asRole("owner", {
+      [`PATCH ${URL}`]: json(400, { name: ["Ensure this field has no more than 32 characters."] }),
+      [`PATCH ${URL}members/3/`]: json(200, { ...MIA, role: "admin" }),
+    });
+    await open();
+    fillIn("New name", "x".repeat(33));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    await screen.findByText("Ensure this field has no more than 32 characters.");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Mia Lee" }), {
+      target: { value: "admin" },
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Ensure this field has no more than 32 characters.")).toBeNull(),
+    );
+    expect(screen.getByLabelText("New name")).toBeValid();
+  });
+
+  it("shows no message for an older change whose reply comes after a later one", async () => {
+    const remove = held();
+    const backend = asRole("owner", {
+      [`DELETE ${URL}members/2/`]: remove.route,
+      [`PATCH ${URL}members/3/`]: json(200, { ...MIA, role: "admin" }),
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Bob Stone" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Mia Lee" }), {
+      target: { value: "admin" },
+    });
+    await waitFor(() =>
+      expect(backend.keys().filter((key) => key === `GET ${URL}`)).toHaveLength(2),
+    );
+
+    remove.respond(json(409, { detail: "Bob has items on loan here." }));
+
+    await waitFor(() =>
+      expect(backend.keys().filter((key) => key === `GET ${URL}`)).toHaveLength(3),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Bob has items on loan here.")).toBeNull();
   });
 
   it("deletes the inventory only after confirming, then goes home", async () => {
@@ -777,7 +821,7 @@ describe("borrowing", () => {
   const ROPE: ListedItem = { id: 20, name: "Rope", description: "", owner: BOBS, ...AVAILABLE };
   const TENT: ListedItem = { ...ROPE, id: 21, name: "Tent", loan_status: "requested" };
   const STOVE: ListedItem = { ...ROPE, id: 22, name: "Stove", loan_status: "on_loan" };
-  const MIAS_PHONE = "(555) 123-0003";
+  const MIAS_PHONE = "(555) 223-0003";
 
   function withListed(role: Role, listed: () => ListedItem[], routes: Routes = {}) {
     return asRole(role, {
@@ -809,8 +853,8 @@ describe("borrowing", () => {
       expect(within(itemFor("Rope")).getByText("Available")).toBeVisible();
       expect(within(itemFor("Tent")).getByText("Requested")).toBeVisible();
       expect(within(itemFor("Stove")).getByText("On loan")).toBeVisible();
-      expect(buttonNames()).toEqual(["Ask to borrow Rope"]);
-      expect(screen.getByRole("button", { name: "Ask to borrow Rope" })).toHaveTextContent(
+      expect(buttonNames()).toEqual(["Ask to borrow: Rope"]);
+      expect(screen.getByRole("button", { name: "Ask to borrow: Rope" })).toHaveTextContent(
         /^Ask to borrow$/,
       );
     });
@@ -825,10 +869,11 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow Rope" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow: Rope" }));
 
       expect(await within(itemFor("Rope")).findByText("Waiting for approval")).toBeVisible();
-      expect(buttonNames()).toEqual(["Cancel request for Rope"]);
+      expect(buttonNames()).toEqual(["Cancel request: Rope"]);
+      expectLabelsInNames(region("Items"));
       expect(backend.requests(`POST ${URL}items/20/borrow/`)).toEqual([undefined]);
     });
 
@@ -842,7 +887,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Cancel request for Rope" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel request: Rope" }));
 
       expect(await within(itemFor("Rope")).findByText("Available")).toBeVisible();
       expect(backend.requests("POST /api/borrowing/20/cancel/")).toEqual([undefined]);
@@ -856,7 +901,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow Rope" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow: Rope" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "This item has already been requested or is on loan.",
@@ -893,15 +938,16 @@ describe("borrowing", () => {
       expect(stove.getByText(`On loan to Mia Lee, ${MIAS_PHONE}`)).toBeVisible();
       expect(within(itemFor("Lamp")).getByText("On loan")).toBeVisible();
       expect(buttonNames()).toEqual([
-        "Mark Stove returned",
-        "Approve request for Tent",
-        "Decline request for Tent",
+        "Mark returned: Stove",
+        "Approve: Tent",
+        "Decline: Tent",
       ]);
+      expectLabelsInNames(region("Items"));
     });
 
     it.each([
-      ["Approve request for Tent", "approve", "on_loan"],
-      ["Decline request for Tent", "decline", "available"],
+      ["Approve: Tent", "approve", "on_loan"],
+      ["Decline: Tent", "decline", "available"],
     ] as const)("%s sends the requester it showed and reloads", async (button, action, after) => {
       let tent: ListedItem = { ...TENT, ...THROUGH_HERE };
       const backend = withListed("admin", () => [tent], {
@@ -930,7 +976,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Mark Stove returned" }));
+      fireEvent.click(screen.getByRole("button", { name: "Mark returned: Stove" }));
 
       expect(await within(itemFor("Stove")).findByText("Available")).toBeVisible();
       expect(backend.requests(`POST ${URL}items/22/return/`)).toEqual([{ borrower_id: MIA.id }]);
@@ -944,7 +990,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Approve request for Tent" }));
+      fireEvent.click(screen.getByRole("button", { name: "Approve: Tent" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "This request or loan changed. Try again.",
@@ -965,7 +1011,7 @@ describe("borrowing", () => {
       expect(within(itemFor("Tent")).getByText("Waiting for approval")).toBeVisible();
       expect(within(itemFor("Stove")).getByText("In use by you")).toBeVisible();
       expect(within(itemFor("Lamp")).getByText("Borrowed by you")).toBeVisible();
-      expect(buttonNames()).toEqual(["Done using it: Stove", "Cancel request for Tent"]);
+      expect(buttonNames()).toEqual(["Done using it: Stove", "Cancel request: Tent"]);
     });
 
     it("says In use by you for a use through another inventory, Borrowed by you for a loan", async () => {

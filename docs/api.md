@@ -48,9 +48,21 @@ cookie: read it again before the next unsafe request.
 ### Phone numbers
 
 Requests may format a phone number with spaces, dots, dashes and parentheses, and may
-start it with `1` or `+1`: `(555) 123-4567`, `+1 555-123-4567` and `5551234567` are the
+start it with `1` or `+1`: `(555) 234-5678`, `+1 555-234-5678` and `5552345678` are the
 same number. Responses always carry 10 digits. Any other value is a `400` on
-`phone_number`.
+`phone_number`:
+
+```json
+{"phone_number": ["Enter a 10-digit US phone number."]}
+```
+
+The area code and the exchange (the 3 digits after it) cannot start with 0 or 1, as in
+the North American Numbering Plan. A number that breaks this rule is a `400` on
+`phone_number`:
+
+```json
+{"phone_number": ["Enter a valid US phone number: the area code and the 3 digits after it cannot start with 0 or 1."]}
+```
 
 ### User
 
@@ -314,7 +326,7 @@ number it went to, until it is accepted.
 `GET /api/connections/requests/` returns both lists, each oldest first:
 
 ```json
-{"received": [{"id": 4, "status": "pending", "user": {"first_name": "Sam", "last_name": "Okafor"}}], "sent": [{"id": 5, "status": "pending", "user": {"phone_number": "5551230004"}}]}
+{"received": [{"id": 4, "status": "pending", "user": {"first_name": "Sam", "last_name": "Okafor"}}], "sent": [{"id": 5, "status": "pending", "user": {"phone_number": "5552340004"}}]}
 ```
 
 ### `POST /api/connections/`

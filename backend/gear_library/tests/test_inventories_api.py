@@ -16,7 +16,7 @@ def inventory_url(inventory, suffix=""):
 
 def make_user(n, first_name="User"):
     return User.objects.create_user(
-        phone_number=f"555123{n:04d}", first_name=first_name, last_name=f"L{n}"
+        phone_number=f"555223{n:04d}", first_name=first_name, last_name=f"L{n}"
     )
 
 
@@ -342,7 +342,7 @@ class TestInventoryInvites:
         assert (invite.status, invite.role) == ("pending", "member")
         assert response.json() == {
             "id": invite.id,
-            "invitee": {"phone_number": "5551230005"},
+            "invitee": {"phone_number": "5552230005"},
             "invited_by": name_of(people[actor]),
         }
 
@@ -378,7 +378,7 @@ class TestInventoryInvites:
         [
             ({}, "This field is required."),
             ({"user_id": "x"}, "A valid integer is required."),
-            ({"phone_number": "5551230005"}, "This field is required."),
+            ({"phone_number": "5552230005"}, "This field is required."),
         ],
     )
     def test_rejects_a_missing_or_invalid_user_id(self, people, body, message):

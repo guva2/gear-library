@@ -111,7 +111,7 @@ describe("discover", () => {
     }));
     await open();
 
-    const button = within(card("Axe")).getByRole("button", { name: "Ask to borrow Axe" });
+    const button = within(card("Axe")).getByRole("button", { name: "Ask to borrow: Axe" });
     expect(button).toHaveTextContent(/^Ask to borrow$/);
     fireEvent.click(button);
 
@@ -128,7 +128,7 @@ describe("discover", () => {
     }));
     await open();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Ask to borrow Rope" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Ask to borrow: Rope" }));
     const through = within(card("Rope")).getByLabelText("Borrow through");
     expect(through).toHaveValue("8");
     expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(0);
@@ -150,7 +150,7 @@ describe("discover", () => {
     }));
     await open();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Ask to borrow Rope" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Ask to borrow: Rope" }));
     fireEvent.change(within(card("Rope")).getByLabelText("Borrow through"), {
       target: { value: "7" },
     });
@@ -174,10 +174,10 @@ describe("discover", () => {
     }));
     await open();
 
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow Axe" }));
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow: Axe" }));
 
     expect(
-      await within(card("Stove")).findByRole("button", { name: "Ask to borrow Stove" }),
+      await within(card("Stove")).findByRole("button", { name: "Ask to borrow: Stove" }),
     ).toBeInTheDocument();
     await waitFor(() =>
       expect(within(card("Axe")).getByRole("heading", { name: "Axe" })).toHaveFocus(),
@@ -193,7 +193,7 @@ describe("discover", () => {
     }));
     await open();
 
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow Axe" }));
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow: Axe" }));
 
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Axe" })).toBeNull());
     await waitFor(() => expect(screen.getByRole("heading", { name: "Discover" })).toHaveFocus());
@@ -203,12 +203,14 @@ describe("discover", () => {
     const backend = liveBackend();
     await open();
 
-    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Ask to borrow Rope" }));
+    fireEvent.click(within(card("Rope")).getByRole("button", { name: "Ask to borrow: Rope" }));
     fireEvent.click(within(card("Rope")).getByRole("button", { name: "Cancel" }));
 
     expect(within(card("Rope")).queryByLabelText("Borrow through")).toBeNull();
     await waitFor(() =>
-      expect(within(card("Rope")).getByRole("button", { name: "Ask to borrow Rope" })).toHaveFocus(),
+      expect(
+        within(card("Rope")).getByRole("button", { name: "Ask to borrow: Rope" }),
+      ).toHaveFocus(),
     );
     expect(backend.requests("POST /api/inventories/8/items/20/borrow/")).toHaveLength(0);
   });
@@ -226,7 +228,7 @@ describe("discover", () => {
     }));
     await open();
 
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow Axe" }));
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow: Axe" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This item has already been requested or is on loan.",
@@ -468,7 +470,7 @@ describe("discover search", () => {
     }));
     await open("/?q=axe");
 
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow Axe" }));
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow: Axe" }));
 
     await waitFor(() => expect(backend.requests(searchUrl("axe"))).toHaveLength(2));
     expect(backend.requests("GET /api/discover/")).toHaveLength(0);
@@ -483,7 +485,7 @@ describe("discover search", () => {
       },
     }));
     await open();
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow Axe" }));
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow: Axe" }));
     await waitFor(() =>
       expect(within(card("Axe")).getByRole("heading", { name: "Axe" })).toHaveFocus(),
     );
@@ -520,7 +522,7 @@ describe("discover search", () => {
         }),
     }));
     await open();
-    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow Axe" }));
+    fireEvent.click(within(card("Axe")).getByRole("button", { name: "Ask to borrow: Axe" }));
     const box = screen.getByRole("searchbox", { name: "Search" });
     box.focus();
     type("r");

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { apiFetch, readErrors, type FieldErrors } from "./api";
 
 interface FieldProps {
@@ -93,22 +93,51 @@ export function Confirmation({ message, confirm, onConfirm, onCancel }: Confirma
 }
 
 /**
+ * Orders the changes sent from one page. Each call marks a new change as the latest and
+ * returns a check that stays true until the next call, so a reply to an older change can
+ * leave out its messages instead of showing them over the newer one's.
+ */
+export function useLatestChange(): () => () => boolean {
+  const latest = useRef(0);
+  return useCallback(() => {
+    const id = ++latest.current;
+    return () => latest.current === id;
+  }, []);
+}
+
+/**
  * Holds a page's errors and `change`, which sends a change and reloads either way: a refusal
  * may come from a change someone else made, so the page shows the current state with it.
+ * `reload` is told whether the reply is to the page's latest change. `begin` clears the
+ * errors and starts a change for a form that sends its own request; it returns whether that
+ * change is still the page's latest. A reply to an older change sets no errors, but still
+ * reloads, since the change may have gone through. `sent` counts the changes started, by
+ * `change` or `begin`, and goes up by one at each start.
  */
-export function useChange(reload: () => void) {
+export function useChange(reload: (latest: boolean) => void) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [sent, setSent] = useState(0);
+  const start = useLatestChange();
+
+  function begin() {
+    setErrors({});
+    setSent((count) => count + 1);
+    return start();
+  }
 
   async function change(path: string, method: "POST" | "DELETE", body?: unknown) {
-    setErrors({});
+    const isLatest = begin();
     try {
       const response = await apiFetch(path, { method, body });
-      if (!response.ok) setErrors(await readErrors(response, []));
-      reload();
+      if (!response.ok) {
+        const errors = await readErrors(response, []);
+        if (isLatest()) setErrors(errors);
+      }
+      reload(isLatest());
     } catch {
-      setErrors(unreachable());
+      if (isLatest()) setErrors(unreachable());
     }
   }
 
-  return { errors, setErrors, change };
+  return { errors, setErrors, change, begin, sent };
 }

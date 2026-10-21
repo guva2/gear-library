@@ -17,8 +17,8 @@ The relational design for the whole app.
 - Foreign keys are `NO ACTION DEFERRABLE INITIALLY DEFERRED` in the database. The
   `on_delete` behaviour shown for each foreign key runs only through Django ORM deletes,
   not raw SQL.
-- Each format rule (phone number) is enforced twice: by a field validator, and by a
-  database check constraint that holds when validation is bypassed.
+- Each format rule (phone number, non-blank names) is enforced twice: by a field
+  validator, and by a database check constraint that holds when validation is bypassed.
 
 ## Tables
 
@@ -29,15 +29,15 @@ There is no username.
 
 | Column | Type | Rules | Built in |
 |---|---|---|---|
-| `phone_number` | `varchar(10)` | Unique. Exactly 10 ASCII digits, check `^[0-9]{10}$`. Login field. | M1 |
+| `phone_number` | `varchar(10)` | Unique. 10 ASCII digits under the North American Numbering Plan: the area code (first digit) and the exchange (fourth digit) cannot be 0 or 1. Check `^[2-9][0-9]{2}[2-9][0-9]{6}$`. Login field. | M1 |
 | `password` | `varchar(128)` | Django password hash. | M1 |
 | `last_login` | `timestamptz` | Nullable. | M1 |
 | `is_active` | `boolean` | Default `true`. | M1 |
 | `is_staff` | `boolean` | Default `false`. Admin site access. | M1 |
 | `is_superuser` | `boolean` | Default `false`. | M1 |
 | `created_at` | `timestamptz` | | M1 |
-| `first_name` | `varchar(32)` | | M3 |
-| `last_name` | `varchar(32)` | | M3 |
+| `first_name` | `varchar(32)` | Not blank: has a character that is not whitespace, check `~ '\S'`. Rows created before names existed hold `Unknown`. | M3 |
+| `last_name` | `varchar(32)` | Not blank, as `first_name`. | M3 |
 
 `groups` and `user_permissions` come from `PermissionsMixin`.
 

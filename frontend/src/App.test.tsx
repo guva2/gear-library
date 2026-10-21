@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ADA, empty, fakeBackend, json } from "./test-backend";
+import { ADA, empty, fakeBackend, held, json } from "./test-backend";
 import { fillIn, renderAt } from "./test-render";
 
 const ANONYMOUS = json(403, { detail: "Authentication credentials were not provided." });
@@ -67,13 +67,85 @@ describe("logout from a stale tab", () => {
   });
 });
 
+describe("login and register pages for a logged-in user", () => {
+  it.each(["/login", "/register"])("send the user from %s to Discover", async (path) => {
+    fakeBackend({ "GET /api/auth/me/": json(200, ADA) });
+
+    const { location } = renderAt(path);
+
+    expect(await screen.findByRole("heading", { name: "Discover" })).toBeInTheDocument();
+    expect(location()).toEqual({ path: "/", navigation: "REPLACE" });
+    expect(screen.queryByLabelText("Password")).toBeNull();
+  });
+
+  it("shows the login form when the session check cannot reach the backend", async () => {
+    fakeBackend({});
+
+    renderAt("/login");
+
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
+  });
+});
+
+describe("login and register pages while the session check is pending", () => {
+  it.each(["/login", "/register"])("show no form at %s", async (path) => {
+    const me = held();
+    fakeBackend({ "GET /api/auth/me/": me.route });
+
+    renderAt(path);
+
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+    me.respond(ANONYMOUS);
+    expect(await screen.findByLabelText("Password")).toBeInTheDocument();
+  });
+});
+
+describe("returning to the page that was asked for", () => {
+  it("logs in and lands on the protected page with its query", async () => {
+    fakeBackend({
+      "GET /api/auth/me/": ANONYMOUS,
+      "POST /api/auth/login/": json(200, ADA),
+    });
+    const { location } = renderAt("/connections?x=1");
+
+    await screen.findByRole("heading", { name: "Log in" });
+    fillIn("Phone number", "5552234567");
+    fillIn("Password", "correct-horse-battery");
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await screen.findByText("Signed in as Ada Lovelace");
+    expect(location().path).toBe("/connections?x=1");
+  });
+
+  it("registers and lands on the protected page with its query", async () => {
+    fakeBackend({
+      "GET /api/auth/me/": ANONYMOUS,
+      "POST /api/auth/register/": json(201, ADA),
+    });
+    const { location } = renderAt("/connections?x=1");
+
+    await screen.findByRole("heading", { name: "Log in" });
+    fireEvent.click(screen.getByRole("link", { name: "Create an account" }));
+    await screen.findByRole("heading", { name: "Create an account" });
+    fillIn("Phone number", "(555) 223-4567");
+    fillIn("First name", "Ada");
+    fillIn("Last name", "Lovelace");
+    fillIn("Password", "correct-horse-battery");
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    await screen.findByText("Signed in as Ada Lovelace");
+    expect(location().path).toBe("/connections?x=1");
+  });
+});
+
 describe("login page", () => {
   it("logs in and shows the home page", async () => {
     fakeBackend({ "GET /api/auth/me/": ANONYMOUS, "POST /api/auth/login/": json(200, ADA) });
     renderAt("/");
 
     await screen.findByRole("heading", { name: "Log in" });
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("Password", "correct-horse-battery");
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
 
@@ -82,13 +154,15 @@ describe("login page", () => {
 
   it("shows the wrong-credentials message for the whole form", async () => {
     fakeBackend({
+      "GET /api/auth/me/": ANONYMOUS,
       "POST /api/auth/login/": json(400, {
         non_field_errors: ["Wrong phone number or password."],
       }),
     });
     renderAt("/login");
+    await screen.findByRole("heading", { name: "Log in" });
 
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("Password", "wrong");
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
 
@@ -100,13 +174,15 @@ describe("login page", () => {
 
   it("shows a repeated form error in a new alert element", async () => {
     fakeBackend({
+      "GET /api/auth/me/": ANONYMOUS,
       "POST /api/auth/login/": json(400, {
         non_field_errors: ["Wrong phone number or password."],
       }),
     });
     renderAt("/login");
+    await screen.findByRole("heading", { name: "Log in" });
 
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("Password", "wrong");
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
     const first = await screen.findByRole("alert");
@@ -119,9 +195,11 @@ describe("login page", () => {
 
   it("shows a phone number error next to the phone number field", async () => {
     fakeBackend({
+      "GET /api/auth/me/": ANONYMOUS,
       "POST /api/auth/login/": json(400, { phone_number: ["Enter a US phone number."] }),
     });
     renderAt("/login");
+    await screen.findByRole("heading", { name: "Log in" });
 
     fillIn("Phone number", "555");
     fillIn("Password", "pw");
@@ -135,8 +213,9 @@ describe("login page", () => {
   });
 
   it("links to the register page", async () => {
-    fakeBackend({});
+    fakeBackend({ "GET /api/auth/me/": ANONYMOUS });
     renderAt("/login");
+    await screen.findByRole("heading", { name: "Log in" });
 
     fireEvent.click(screen.getByRole("link", { name: "Create an account" }));
 
@@ -146,10 +225,14 @@ describe("login page", () => {
 
 describe("register page", () => {
   it("creates the account and shows the home page", async () => {
-    const backend = fakeBackend({ "POST /api/auth/register/": json(201, ADA) });
+    const backend = fakeBackend({
+      "GET /api/auth/me/": ANONYMOUS,
+      "POST /api/auth/register/": json(201, ADA),
+    });
     renderAt("/register");
+    await screen.findByRole("heading", { name: "Create an account" });
 
-    fillIn("Phone number", "(555) 123-4567");
+    fillIn("Phone number", "(555) 223-4567");
     fillIn("First name", "Ada");
     fillIn("Last name", "Lovelace");
     fillIn("Password", "correct-horse-battery");
@@ -158,7 +241,7 @@ describe("register page", () => {
     expect(await screen.findByText("Signed in as Ada Lovelace")).toBeInTheDocument();
     expect(backend.requests("POST /api/auth/register/")).toEqual([
       {
-        phone_number: "(555) 123-4567",
+        phone_number: "(555) 223-4567",
         first_name: "Ada",
         last_name: "Lovelace",
         password: "correct-horse-battery",
@@ -168,14 +251,16 @@ describe("register page", () => {
 
   it("shows each field's errors next to that field", async () => {
     fakeBackend({
+      "GET /api/auth/me/": ANONYMOUS,
       "POST /api/auth/register/": json(400, {
         phone_number: ["A user with this phone number already exists."],
         password: ["This password is too short.", "This password is too common."],
       }),
     });
     renderAt("/register");
+    await screen.findByRole("heading", { name: "Create an account" });
 
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("First name", "Ada");
     fillIn("Last name", "Lovelace");
     fillIn("Password", "abc");
@@ -195,9 +280,11 @@ describe("register page", () => {
 
   it("shows an error for a field the page has no input for", async () => {
     fakeBackend({
+      "GET /api/auth/me/": ANONYMOUS,
       "POST /api/auth/register/": json(400, { __all__: ["Something about the account."] }),
     });
     renderAt("/register");
+    await screen.findByRole("heading", { name: "Create an account" });
 
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
@@ -206,14 +293,16 @@ describe("register page", () => {
 
   it("moves focus to the first invalid field after a failed submit", async () => {
     fakeBackend({
+      "GET /api/auth/me/": ANONYMOUS,
       "POST /api/auth/register/": json(400, {
         first_name: ["This field may not be blank."],
         password: ["This password is too short."],
       }),
     });
     renderAt("/register");
+    await screen.findByRole("heading", { name: "Create an account" });
 
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("Password", "abc");
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
@@ -293,9 +382,10 @@ describe("layout", () => {
   });
 
   it("shows the login form without a sidebar", async () => {
-    fakeBackend({});
+    fakeBackend({ "GET /api/auth/me/": ANONYMOUS });
 
     renderAt("/login");
+    await screen.findByRole("heading", { name: "Log in" });
 
     expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation")).toBeNull();

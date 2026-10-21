@@ -12,7 +12,7 @@ REQUESTS_URL = "/api/connections/requests/"
 
 def make_user(n, first_name, last_name):
     return User.objects.create_user(
-        phone_number=f"555123{n:04d}", first_name=first_name, last_name=last_name
+        phone_number=f"555223{n:04d}", first_name=first_name, last_name=last_name
     )
 
 
@@ -174,7 +174,7 @@ class TestRequest:
         )
 
     def test_sends_a_request_by_a_formatted_phone_number(self, people):
-        response = self.send(people["stan"], "(555) 123-0001")
+        response = self.send(people["stan"], "(555) 223-0001")
 
         assert response.status_code == 201
         row = Connection.objects.get(requested_by=people["stan"])
@@ -192,9 +192,14 @@ class TestRequest:
         "phone_number, message",
         [
             ("555", "Enter a 10-digit US phone number."),
+            (
+                "5551999999",
+                "Enter a valid US phone number: the area code and the 3 digits after it "
+                "cannot start with 0 or 1.",
+            ),
             ("", "This field may not be blank."),
             ("5559999999", "No user has this phone number."),
-            ("5551230001", "You cannot send a request to yourself."),
+            ("5552230001", "You cannot send a request to yourself."),
         ],
     )
     def test_rejects_an_invalid_unknown_or_own_phone_number(self, people, phone_number, message):
@@ -323,7 +328,7 @@ def test_unsafe_requests_need_the_csrf_token(people):
     client = APIClient(enforce_csrf_checks=True)
     client.force_login(people["stan"])
 
-    response = client.post(CONNECTIONS_URL, {"phone_number": "5551230001"}, format="json")
+    response = client.post(CONNECTIONS_URL, {"phone_number": "5552230001"}, format="json")
 
     assert response.status_code == 403
     assert "CSRF" in response.json()["detail"]

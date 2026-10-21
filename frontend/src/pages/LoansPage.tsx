@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useAuth } from "../auth";
 import { FormErrors, useChange } from "../forms";
 import { fullName, getJson } from "../inventories";
@@ -55,7 +56,29 @@ interface Action {
 export default function LoansPage() {
   const { user } = useAuth();
   const [page, reload] = useLoad(loadPage);
-  const { errors, change } = useChange(reload);
+  // The button used last, and whether its change has replied. A reload that unmounts it, by
+  // removing its item or moving the item to another section, would drop focus to the page
+  // body. It is watched until the reload after its own reply: a reload after an older
+  // change's reply can come first and leave it in place.
+  const actedOn = useRef<{ button: HTMLButtonElement; replied: boolean } | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const { errors, change } = useChange((latest) => {
+    if (latest && actedOn.current) actedOn.current.replied = true;
+    reload();
+  });
+
+  useEffect(() => {
+    const acted = actedOn.current;
+    if (page.status === "loading" || acted === null) return;
+    if (acted.button.isConnected && !acted.replied) return;
+    if (!acted.button.isConnected) heading.current?.focus();
+    actedOn.current = null;
+  }, [page]);
+
+  function act(button: HTMLButtonElement, action: Action) {
+    actedOn.current = { button, replied: false };
+    action.run();
+  }
 
   /**
    * The signed-in user's own item is returned as its owner, anyone else's through its loan
@@ -75,12 +98,12 @@ export default function LoansPage() {
     return [
       {
         label: "Approve",
-        name: `Approve request for ${item.name}`,
+        name: `Approve: ${item.name}`,
         run: () => change(`${path}approve/`, "POST", body),
       },
       {
         label: "Decline",
-        name: `Decline request for ${item.name}`,
+        name: `Decline: ${item.name}`,
         run: () => change(`${path}decline/`, "POST", body),
       },
     ];
@@ -93,7 +116,7 @@ export default function LoansPage() {
     return [
       {
         label: "Mark returned",
-        name: `Mark ${item.name} returned`,
+        name: `Mark returned: ${item.name}`,
         run: () => change(path, "POST", body),
       },
     ];
@@ -115,7 +138,7 @@ export default function LoansPage() {
     return [
       {
         label: "Cancel request",
-        name: `Cancel request for ${item.name}`,
+        name: `Cancel request: ${item.name}`,
         run: () => change(`/api/borrowing/${item.id}/cancel/`, "POST"),
       },
     ];
@@ -123,7 +146,9 @@ export default function LoansPage() {
 
   return (
     <>
-      <h2>Loans</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        Loans
+      </h2>
       <FormErrors errors={errors} />
       {page.status === "loading" && <p>Loading…</p>}
       {page.status === "error" && <p role="alert">Could not load your loans.</p>}
@@ -136,6 +161,7 @@ export default function LoansPage() {
             items={page.data.lending.filter((item) => item.loan_status === "requested")}
             describe={lendingText}
             actions={answers}
+            onAct={act}
           />
           <LoanSection
             id="lent-out"
@@ -144,6 +170,7 @@ export default function LoansPage() {
             items={page.data.lending.filter((item) => item.loan_status === "on_loan")}
             describe={lendingText}
             actions={returning}
+            onAct={act}
           />
           <LoanSection
             id="my-requests"
@@ -152,6 +179,7 @@ export default function LoansPage() {
             items={page.data.borrowed.filter((item) => item.loan_status === "requested")}
             describe={borrowedText}
             actions={cancelling}
+            onAct={act}
           />
           <LoanSection
             id="using"
@@ -162,6 +190,7 @@ export default function LoansPage() {
             )}
             describe={usingText}
             actions={markingAvailable}
+            onAct={act}
           />
           <LoanSection
             id="borrowed"
@@ -172,6 +201,7 @@ export default function LoansPage() {
             )}
             describe={borrowedText}
             actions={() => []}
+            onAct={act}
           />
         </>
       )}
@@ -186,6 +216,7 @@ interface LoanSectionProps<T> {
   items: T[];
   describe: (item: T) => string;
   actions: (item: T) => Action[];
+  onAct: (button: HTMLButtonElement, action: Action) => void;
 }
 
 function LoanSection<T extends { id: number }>({
@@ -195,6 +226,7 @@ function LoanSection<T extends { id: number }>({
   items,
   describe,
   actions,
+  onAct,
 }: LoanSectionProps<T>) {
   return (
     <section aria-labelledby={id}>
@@ -209,7 +241,11 @@ function LoanSection<T extends { id: number }>({
               {actions(item).map((action) => (
                 <span key={action.name}>
                   {" "}
-                  <button type="button" aria-label={action.name} onClick={action.run}>
+                  <button
+                    type="button"
+                    aria-label={action.name}
+                    onClick={(event) => onAct(event.currentTarget, action)}
+                  >
                     {action.label}
                   </button>
                 </span>

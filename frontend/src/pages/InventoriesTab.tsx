@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
-import { Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
+import { Field, FormErrors, unreachable, useFocusFirstInvalid, useLatestChange } from "../forms";
 import { fullName, getJson, type Inventory, type MyInvite } from "../inventories";
 import { useLoad } from "../load";
 
@@ -21,6 +21,14 @@ async function loadLists(signal: AbortSignal): Promise<Lists> {
 /** The signed-in user's inventories, the form to create one, and their pending invites. */
 export default function InventoriesTab() {
   const [lists, reload] = useLoad(loadLists);
+  // Counts the changes started from this tab. Each form clears its errors when the count
+  // changes.
+  const [sent, setSent] = useState(0);
+  const latest = useLatestChange();
+  const start = () => {
+    setSent((count) => count + 1);
+    return latest();
+  };
 
   return (
     <>
@@ -28,15 +36,34 @@ export default function InventoriesTab() {
       {lists.status === "error" && <p role="alert">Could not load your inventories.</p>}
       {lists.status === "ok" && (
         <>
-          <InventoryList inventories={lists.data.inventories} />
-          <Invites invites={lists.data.invites} reload={reload} />
+          <InventoryList
+            inventories={lists.data.inventories}
+            reload={reload}
+            start={start}
+            sent={sent}
+          />
+          <Invites invites={lists.data.invites} reload={reload} start={start} sent={sent} />
         </>
       )}
     </>
   );
 }
 
-function InventoryList({ inventories }: { inventories: Inventory[] }) {
+/** Starts a change; the check it returns says whether the change is still the latest. */
+type StartChange = () => () => boolean;
+
+interface ChangeProps {
+  reload: () => void;
+  start: StartChange;
+  /** The tab's count of changes started. A change from elsewhere on the tab clears the errors. */
+  sent: number;
+}
+
+interface InventoryListProps extends ChangeProps {
+  inventories: Inventory[];
+}
+
+function InventoryList({ inventories, reload, start, sent }: InventoryListProps) {
   return (
     <section aria-labelledby="my-inventories">
       <h3 id="my-inventories">My inventories</h3>
@@ -52,32 +79,37 @@ function InventoryList({ inventories }: { inventories: Inventory[] }) {
           ))}
         </ul>
       )}
-      <CreateInventory />
+      <CreateInventory reload={reload} start={start} sent={sent} />
     </section>
   );
 }
 
-function CreateInventory() {
+function CreateInventory({ reload, start, sent }: ChangeProps) {
   const navigate = useNavigate();
   const [errors, setErrors] = useState<FieldErrors>({});
+  useEffect(() => setErrors({}), [sent]);
   const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const isLatest = start();
     try {
       const response = await apiFetch("/api/inventories/", {
         method: "POST",
         body: { name: form.get("name") },
       });
       if (!response.ok) {
-        setErrors(await readErrors(response, ["name"]));
+        const errors = await readErrors(response, ["name"]);
+        if (isLatest()) setErrors(errors);
         return;
       }
       const inventory = (await response.json()) as Inventory;
-      navigate(`/inventories/${inventory.id}`);
+      // After a later change, the new inventory shows in the list instead of taking over.
+      if (isLatest()) navigate(`/inventories/${inventory.id}`);
+      else reload();
     } catch {
-      setErrors(unreachable());
+      if (isLatest()) setErrors(unreachable());
     }
   }
 
@@ -90,18 +122,25 @@ function CreateInventory() {
   );
 }
 
-function Invites({ invites, reload }: { invites: MyInvite[]; reload: () => void }) {
+interface InvitesProps extends ChangeProps {
+  invites: MyInvite[];
+}
+
+function Invites({ invites, reload, start, sent }: InvitesProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  useEffect(() => setErrors({}), [sent]);
 
   async function answer(invite: MyInvite, action: "accept" | "decline") {
+    const isLatest = start();
     try {
       const response = await apiFetch(`/api/invites/${invite.id}/${action}/`, {
         method: "POST",
       });
-      setErrors(response.ok ? {} : await readErrors(response, []));
+      const errors = response.ok ? {} : await readErrors(response, []);
+      if (isLatest()) setErrors(errors);
       reload();
     } catch {
-      setErrors(unreachable());
+      if (isLatest()) setErrors(unreachable());
     }
   }
 

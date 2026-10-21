@@ -10,7 +10,7 @@ User = get_user_model()
 
 @pytest.fixture
 def ada():
-    return User.objects.create_user(phone_number="5551230001", first_name="Ada", last_name="L")
+    return User.objects.create_user(phone_number="5552230001", first_name="Ada", last_name="L")
 
 
 @pytest.fixture
@@ -87,7 +87,7 @@ def test_the_listing_foreign_keys_are_no_action_and_checked_at_commit(target):
 
 @pytest.fixture
 def bea():
-    return User.objects.create_user(phone_number="5551230002", first_name="Bea", last_name="M")
+    return User.objects.create_user(phone_number="5552230002", first_name="Bea", last_name="M")
 
 
 def set_loan(item, **fields):

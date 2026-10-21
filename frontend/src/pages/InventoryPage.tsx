@@ -3,7 +3,14 @@ import { Link, useNavigate, useParams } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { useAuth } from "../auth";
 import type { Connection } from "../connections";
-import { Confirmation, Field, FormErrors, unreachable, useFocusFirstInvalid } from "../forms";
+import {
+  Confirmation,
+  Field,
+  FormErrors,
+  unreachable,
+  useFocusFirstInvalid,
+  useLatestChange,
+} from "../forms";
 import {
   fullName,
   getJson,
@@ -74,12 +81,19 @@ type Send = (
   path: string,
   method: Method,
   options?: { body?: unknown; fields?: readonly string[] },
-) => Promise<Failure | null>;
+) => Promise<Reply>;
 
 /** A change that did not succeed. `status` is `null` when there was no response. */
 interface Failure {
   errors: FieldErrors;
   status: number | null;
+}
+
+interface Reply {
+  /** `null` when the change succeeded. */
+  failure: Failure | null;
+  /** False when a later change was sent from the page: the caller shows no message. */
+  latest: boolean;
 }
 
 export default function InventoryPage() {
@@ -104,8 +118,10 @@ function InventoryView({ base }: { base: string }) {
   const [page, reload] = useLoad((signal) => loadPage(base, signal));
   const [errors, setErrors] = useState<FieldErrors>({});
   const [refusal, setRefusal] = useState<FieldErrors>({});
-  // Counts the changes sent, so the pickers can drop messages left by an earlier one.
+  // Counts the changes sent from this page. A form that keeps its own errors clears them
+  // when the count changes.
   const [sent, setSent] = useState(0);
+  const start = useLatestChange();
 
   /**
    * Sends a change. Returns the failure for the caller to show, or `null` when it succeeded.
@@ -116,30 +132,33 @@ function InventoryView({ base }: { base: string }) {
     setRefusal({});
     setErrors({});
     setSent((count) => count + 1);
+    const isLatest = start();
     try {
       const response = await apiFetch(path, { method, body });
-      if (response.ok) return null;
+      if (response.ok) return { failure: null, latest: isLatest() };
       const errors = await readErrors(response, fields);
       // The refusal may come from a change someone else made; show the current state.
       reload();
-      if (response.status !== 403) return { errors, status: response.status };
-      setRefusal(errors);
-      return { errors: {}, status: 403 };
+      if (response.status !== 403) {
+        return { failure: { errors, status: response.status }, latest: isLatest() };
+      }
+      if (isLatest()) setRefusal(errors);
+      return { failure: { errors: {}, status: 403 }, latest: isLatest() };
     } catch {
-      return { errors: unreachable(), status: null };
+      return { failure: { errors: unreachable(), status: null }, latest: isLatest() };
     }
   };
 
   async function act(path: string, method: Method, body?: unknown) {
-    const failed = await send(path, method, { body });
-    setErrors(failed?.errors ?? {});
-    if (!failed) reload();
+    const { failure, latest } = await send(path, method, { body });
+    if (latest) setErrors(failure?.errors ?? {});
+    if (!failure) reload();
   }
 
   async function leaveOrDelete(path: string) {
-    const failed = await send(path, "DELETE");
-    if (failed) setErrors(failed.errors);
-    else navigate("/manage/inventories");
+    const { failure, latest } = await send(path, "DELETE");
+    if (!failure) navigate("/manage/inventories");
+    else if (latest) setErrors(failure.errors);
   }
 
   if (page.status === "loading") return <p>Loading…</p>;
@@ -212,6 +231,7 @@ function InventoryView({ base }: { base: string }) {
         <Manage
           name={inventory.name}
           send={send}
+          sent={sent}
           base={base}
           reload={reload}
           onDelete={() => leaveOrDelete(base)}
@@ -453,7 +473,7 @@ function LoanButtons({ userId, onLoanChange, ...holding }: LoanButtonsProps) {
   } else if (item.loan_status === "available") {
     buttons.push({
       label: "Ask to borrow",
-      name: `Ask to borrow ${item.name}`,
+      name: `Ask to borrow: ${item.name}`,
       onClick: () => onLoanChange(`${path}borrow/`),
     });
   }
@@ -468,7 +488,7 @@ function LoanButtons({ userId, onLoanChange, ...holding }: LoanButtonsProps) {
   if (item.loan_status === "requested" && item.borrowed_by_me) {
     buttons.push({
       label: "Cancel request",
-      name: `Cancel request for ${item.name}`,
+      name: `Cancel request: ${item.name}`,
       onClick: () => onLoanChange(`/api/borrowing/${item.id}/cancel/`),
     });
   }
@@ -476,12 +496,12 @@ function LoanButtons({ userId, onLoanChange, ...holding }: LoanButtonsProps) {
     buttons.push(
       {
         label: "Approve",
-        name: `Approve request for ${item.name}`,
+        name: `Approve: ${item.name}`,
         onClick: () => onLoanChange(`${path}approve/`, asStaff),
       },
       {
         label: "Decline",
-        name: `Decline request for ${item.name}`,
+        name: `Decline: ${item.name}`,
         onClick: () => onLoanChange(`${path}decline/`, asStaff),
       },
     );
@@ -489,7 +509,7 @@ function LoanButtons({ userId, onLoanChange, ...holding }: LoanButtonsProps) {
   if (item.loan_status === "on_loan" && asStaff) {
     buttons.push({
       label: "Mark returned",
-      name: `Mark ${item.name} returned`,
+      name: `Mark returned: ${item.name}`,
       onClick: () => onLoanChange(`${path}return/`, asStaff),
     });
   }
@@ -659,7 +679,10 @@ function Picker({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const id = Number(new FormData(event.currentTarget).get(field));
-    const failed = await send(path, "POST", { body: { [field]: id }, fields: [field] });
+    const { failure: failed, latest } = await send(path, "POST", {
+      body: { [field]: id },
+      fields: [field],
+    });
     // A 400 or 409 means the chosen option was refused. It may leave the picker on reload,
     // so the message names it and sits above the picker instead of beside whichever option
     // the select falls back to. After a 5xx or no response the change may have gone
@@ -667,11 +690,13 @@ function Picker({
     const refused = options.find((option) => option.id === id);
     const reasons = [...(failed?.errors[field] ?? []), ...(failed?.errors.form ?? [])];
     const refusal = failed?.status === 400 || failed?.status === 409;
-    setErrors(
-      refusal && reasons.length > 0
-        ? { form: [`${refused ? refused.name : unknown} ${notDone}. ${reasons.join(" ")}`] }
-        : (failed?.errors ?? {}),
-    );
+    if (latest) {
+      setErrors(
+        refusal && reasons.length > 0
+          ? { form: [`${refused ? refused.name : unknown} ${notDone}. ${reasons.join(" ")}`] }
+          : (failed?.errors ?? {}),
+      );
+    }
     if (!failed || failed.status === null) reload();
   }
 
@@ -704,24 +729,27 @@ function Picker({
 interface ManageProps {
   name: string;
   send: Send;
+  /** The page's count of changes sent. A change from elsewhere on the page clears the errors. */
+  sent: number;
   base: string;
   reload: () => void;
   onDelete: () => void;
 }
 
-function Manage({ name, send, base, reload, onDelete }: ManageProps) {
+function Manage({ name, send, sent, base, reload, onDelete }: ManageProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  useEffect(() => setErrors({}), [sent]);
   const [confirming, setConfirming] = useState(false);
   const formRef = useFocusFirstInvalid(errors);
 
   async function rename(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    const failed = await send(base, "PATCH", {
+    const { failure: failed, latest } = await send(base, "PATCH", {
       body: { name: new FormData(form).get("name") },
       fields: ["name"],
     });
-    setErrors(failed?.errors ?? {});
+    if (latest) setErrors(failed?.errors ?? {});
     if (!failed) {
       form.reset();
       reload();

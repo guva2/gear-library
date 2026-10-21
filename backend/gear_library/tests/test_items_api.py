@@ -24,7 +24,7 @@ def listings_url(inventory, item=None):
 
 def make_user(n, first_name="User"):
     return User.objects.create_user(
-        phone_number=f"555123{n:04d}", first_name=first_name, last_name=f"L{n}"
+        phone_number=f"555223{n:04d}", first_name=first_name, last_name=f"L{n}"
     )
 
 

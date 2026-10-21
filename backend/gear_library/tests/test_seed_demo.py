@@ -60,7 +60,7 @@ def test_creates_demo_users_who_can_log_in():
     seed()
 
     users = list(User.objects.all())
-    assert len(users) >= 3
+    assert sorted(u.first_name for u in users) == ["Avery", "Jordan", "Riley", "Sam"]
     for user in users:
         assert user.first_name and user.last_name
         assert not user.is_staff
@@ -109,11 +109,13 @@ def test_creates_three_inventories_using_every_role_and_one_pending_invite():
 
 
 @pytest.mark.django_db
-def test_every_demo_user_belongs_to_an_inventory():
+def test_every_demo_user_but_riley_belongs_to_an_inventory():
     seed()
 
     for user in User.objects.all():
-        assert user.memberships.active().exists()
+        has_inventory = user.memberships.active().exists()
+        assert has_inventory == (user.first_name != "Riley"), user.first_name
+    assert not Membership.objects.filter(user__first_name="Riley").exists()
 
 
 @pytest.mark.django_db
@@ -139,7 +141,7 @@ def test_does_not_touch_an_inventory_with_a_demo_name_that_is_not_the_demo_one()
     Item.objects.end_loan()
     Inventory.objects.all().delete()
     stranger = User.objects.create_user(
-        phone_number="5551239999", first_name="Real", last_name="Person"
+        phone_number="5552239999", first_name="Real", last_name="Person"
     )
     for name in demo_names:
         real = Inventory.objects.create(name=name)
@@ -158,23 +160,28 @@ def demo_users():
 
 
 @pytest.mark.django_db
-def test_connects_the_demo_users_and_leaves_one_request_pending():
+def test_connects_every_pair_of_avery_jordan_and_sam_and_riley_has_asked_avery():
     seed()
 
-    avery, jordan, sam = demo_users()
-    assert Connection.objects.between(sam, avery).get().status == "accepted"
+    avery, jordan, sam, riley = demo_users()
+    assert Connection.objects.between(avery, jordan).get().status == "accepted"
     assert Connection.objects.between(jordan, sam).get().status == "accepted"
+    assert Connection.objects.between(sam, avery).get().status == "accepted"
     pending = Connection.objects.pending().get()
-    assert (pending.requested_by, pending.other_user(avery)) == (avery, jordan)
+    assert (pending.requested_by, pending.other_user(riley)) == (riley, avery)
+    assert Connection.objects.count() == 4
 
 
 @pytest.mark.django_db
-def test_every_pending_invite_went_to_a_connection_of_its_sender():
+def test_every_membership_with_an_inviter_is_between_connected_users():
     seed()
 
-    for invite in Membership.objects.pending():
-        pair = Connection.objects.accepted().between(invite.user, invite.invited_by)
-        assert pair.exists()
+    invited = Membership.objects.exclude(invited_by=None)
+    assert invited.filter(status="pending").exists()
+    assert invited.filter(status="active").exists()
+    for membership in invited:
+        pair = Connection.objects.accepted().between(membership.user, membership.invited_by)
+        assert pair.exists(), (membership.user.first_name, membership.inventory.name)
 
 
 @pytest.mark.django_db
@@ -185,7 +192,7 @@ def test_leaves_a_changed_demo_connection_alone():
     seed()
 
     assert not Connection.objects.pending().exists()
-    assert Connection.objects.count() == 3
+    assert Connection.objects.count() == 4
 
 
 @pytest.mark.django_db
@@ -193,7 +200,7 @@ def test_leaves_a_real_users_connection_to_a_demo_user_alone():
     seed()
     avery = demo_users()[0]
     stranger = User.objects.create_user(
-        phone_number="5551239999", first_name="Real", last_name="Person"
+        phone_number="5552239999", first_name="Real", last_name="Person"
     )
     first, second = ordered_pair(avery, stranger)
     real = Connection.objects.create(
@@ -203,15 +210,15 @@ def test_leaves_a_real_users_connection_to_a_demo_user_alone():
     seed()
 
     assert Connection.objects.filter(pk=real.pk, status="pending").exists()
-    assert Connection.objects.count() == 4
+    assert Connection.objects.count() == 5
 
 
 @pytest.mark.django_db
-def test_gives_every_demo_user_items_and_lists_some_in_every_shared_inventory():
+def test_gives_every_demo_user_but_riley_items_and_lists_some_in_every_shared_inventory():
     seed()
 
     for user in User.objects.all():
-        assert user.items.exists()
+        assert user.items.exists() == (user.first_name != "Riley"), user.first_name
     for inventory in Inventory.objects.all():
         shared = inventory.memberships.active().count() > 1
         assert inventory.listings.exists() == shared, inventory.name
@@ -307,25 +314,25 @@ def test_lends_a_new_demo_item_only_while_the_borrower_is_a_member_where_it_is_l
 
 
 @pytest.mark.django_db
-def test_every_demo_user_has_a_loan_to_see():
+def test_every_demo_user_but_riley_has_a_loan_to_see():
     seed()
 
     for user in User.objects.all():
         client = APIClient()
         client.force_authenticate(user)
         loans = client.get("/api/lending/").json() + client.get("/api/borrowing/").json()
-        assert loans, user.first_name
+        assert bool(loans) == (user.first_name != "Riley"), user.first_name
 
 
 @pytest.mark.django_db
-def test_avery_and_sam_have_something_to_discover_and_jordan_has_nothing():
+def test_avery_and_sam_have_something_to_discover_and_jordan_and_riley_have_nothing():
     seed()
 
     for user in User.objects.all():
         client = APIClient()
         client.force_authenticate(user)
         found = client.get("/api/discover/").json()
-        assert bool(found) == (user.first_name != "Jordan"), user.first_name
+        assert bool(found) == (user.first_name in ("Avery", "Sam")), user.first_name
 
 
 @pytest.mark.django_db
@@ -336,3 +343,17 @@ def test_avery_joined_camping_crew_through_an_invite_from_sam():
         inventory__name="Camping Crew", user__first_name="Avery"
     )
     assert membership.invited_by.first_name == "Sam"
+
+
+@pytest.mark.django_db
+def test_every_active_member_but_the_owner_has_an_admin_or_owner_as_inviter():
+    seed()
+
+    for membership in Membership.objects.active().exclude(role="owner"):
+        assert membership.invited_by is not None, membership.user.first_name
+        inviter = Membership.objects.active().get(
+            inventory=membership.inventory, user=membership.invited_by
+        )
+        assert inviter.role in ("admin", "owner")
+    for owner in Membership.objects.filter(role="owner"):
+        assert owner.invited_by is None

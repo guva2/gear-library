@@ -1,5 +1,5 @@
 import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router";
-import { AuthProvider, RequireAuth } from "./auth";
+import { AuthProvider, RequireAnonymous, RequireAuth } from "./auth";
 import { AppLayout, PublicLayout } from "./Layout";
 import ConnectionsPage from "./pages/ConnectionsPage";
 import DiscoverPage from "./pages/DiscoverPage";
@@ -24,8 +24,22 @@ export function AppRoutes() {
     <AuthProvider>
       <Routes>
         <Route element={<PublicLayout />}>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/login"
+            element={
+              <RequireAnonymous>
+                <LoginPage />
+              </RequireAnonymous>
+            }
+          />
+          <Route
+            path="/register"
+            element={
+              <RequireAnonymous>
+                <RegisterPage />
+              </RequireAnonymous>
+            }
+          />
           <Route path="*" element={<NotFound />} />
         </Route>
         <Route

@@ -1,13 +1,13 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Item } from "../items";
-import { ADA, empty, fakeBackend, json } from "../test-backend";
-import { renderAt } from "../test-render";
+import { ADA, empty, fakeBackend, held, json } from "../test-backend";
+import { expectLabelsInNames, renderAt, settle } from "../test-render";
 
 type Routes = Parameters<typeof fakeBackend>[0];
 
 const NO_LOAN = { loan_status: "available", borrower: null, loan_inventory: null } as const;
-const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5551230003" };
+const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5552230003" };
 
 const ROPE: Item = {
   id: 20,
@@ -125,6 +125,50 @@ describe("page-level errors", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit Axe" }));
     fireEvent.click(within(itemFor("Axe")).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("form errors", () => {
+  it("clears the add form's errors when another change starts on the page", async () => {
+    liveBackend((state) => ({
+      "POST /api/items/": json(400, { name: ["This field is required."] }),
+      "DELETE /api/items/21/": () => {
+        state.items = [ROPE];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    const add = region("Add an item");
+    fireEvent.click(within(add).getByRole("button", { name: "Add" }));
+    const name = within(add).getByLabelText("Name");
+    await waitFor(() => expect(name).toHaveAccessibleDescription("This field is required."));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Axe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
+
+    await waitFor(() => expect(name).not.toHaveAccessibleDescription());
+  });
+
+  it("clears the edit form's errors when another change starts on the page", async () => {
+    liveBackend((state) => ({
+      "PATCH /api/items/20/": json(400, { name: ["This field may not be blank."] }),
+      "POST /api/items/21/use/": () => {
+        state.items = [{ ...AXE, loan_status: "on_loan", borrower: ADA }, ROPE];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Rope" }));
+    const form = itemFor("Rope");
+    fill(form, "Name", "");
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    const name = within(form).getByLabelText("Name");
+    await waitFor(() => expect(name).toHaveAccessibleDescription("This field may not be blank."));
+
+    fireEvent.click(screen.getByRole("button", { name: "Use it myself: Axe" }));
+
+    await waitFor(() => expect(name).not.toHaveAccessibleDescription());
+    expect(within(form).queryByRole("alert")).toBeNull();
   });
 });
 
@@ -308,15 +352,15 @@ describe("loans of my items", () => {
 
     expect(
       within(itemFor("Axe")).getByText(
-        "Requested by Mia Lee, (555) 123-0003, through Climbing Club.",
+        "Requested by Mia Lee, (555) 223-0003, through Climbing Club.",
       ),
     ).toBeVisible();
     expect(
       within(itemFor("Rope")).getByText(
-        "On loan to Mia Lee, (555) 123-0003, through Climbing Club.",
+        "On loan to Mia Lee, (555) 223-0003, through Climbing Club.",
       ),
     ).toBeVisible();
-    expect(within(itemFor("Tent")).getByText("On loan to Mia Lee, (555) 123-0003.")).toBeVisible();
+    expect(within(itemFor("Tent")).getByText("On loan to Mia Lee, (555) 223-0003.")).toBeVisible();
   });
 
   it("says when an item is available", async () => {
@@ -338,9 +382,10 @@ describe("loans of my items", () => {
       };
     });
     await open();
-    expect(screen.getAllByRole("button", { name: /^Mark .* returned$/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /^Mark returned: / })).toHaveLength(1);
+    expectLabelsInNames(region("My items"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark Rope returned" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark returned: Rope" }));
 
     expect(await within(itemFor("Rope")).findByText("Available.")).toBeVisible();
     expect(backend.requests("POST /api/items/20/return/")).toEqual([{ borrower_id: MIA.id }]);
@@ -415,5 +460,54 @@ describe("loans of my items", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This item is on loan. It can be deleted once it is returned.",
     );
+  });
+});
+
+describe("two changes in flight", () => {
+  it("shows no add error from a reply that arrives after a later change", async () => {
+    const add = held();
+    liveBackend((state) => ({
+      "POST /api/items/": add.route,
+      "DELETE /api/items/21/": () => {
+        state.items = [ROPE];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    const form = region("Add an item");
+    fill(form, "Name", "Tent");
+    fireEvent.click(within(form).getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Axe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Delete Axe" })).toBeNull());
+
+    add.respond(json(400, { name: ["This field may not be blank."] }));
+    await settle();
+
+    expect(within(form).getByLabelText("Name")).not.toHaveAccessibleDescription(
+      "This field may not be blank.",
+    );
+  });
+
+  it("shows no deleted-item error from an edit reply that arrives after a later change", async () => {
+    const edit = held();
+    liveBackend((state) => ({
+      "PATCH /api/items/20/": edit.route,
+      "DELETE /api/items/21/": () => {
+        state.items = [ROPE];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Rope" }));
+    fireEvent.click(within(itemFor("Rope")).getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Axe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Delete Axe" })).toBeNull());
+
+    edit.respond(json(404, { detail: "Item not found." }));
+    await settle();
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
