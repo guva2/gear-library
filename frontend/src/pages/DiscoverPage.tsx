@@ -226,7 +226,7 @@ function BorrowButton({ item, onRequest }: BorrowButtonProps) {
         <button
           ref={button}
           type="button"
-          aria-label={`Ask to borrow ${item.name}`}
+          aria-label={`Ask to borrow: ${item.name}`}
           onClick={start}
         >
           Ask to borrow

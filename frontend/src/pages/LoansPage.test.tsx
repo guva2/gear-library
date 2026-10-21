@@ -7,7 +7,7 @@ import { expectLabelsInNames, renderAt } from "../test-render";
 type Routes = Parameters<typeof fakeBackend>[0];
 
 const CLIMBING = { id: 7, name: "Climbing Club" };
-const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5551230003" };
+const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5552230003" };
 const BOB = { first_name: "Bob", last_name: "Stone" };
 
 const ROPE: LendingItem = {
@@ -111,7 +111,7 @@ describe("waiting for your approval", () => {
     await open();
 
     expect(texts("Waiting for your approval")).toEqual([
-      "Rope: 60 m, yours. Requested by Mia Lee, (555) 123-0003, through Climbing Club.",
+      "Rope: 60 m, yours. Requested by Mia Lee, (555) 223-0003, through Climbing Club.",
     ]);
   });
 
@@ -172,9 +172,9 @@ describe("lent out", () => {
     await open();
 
     expect(texts("Lent out")).toEqual([
-      "Axe, yours. On loan to Mia Lee, (555) 123-0003, through Climbing Club.",
-      "Cord, owned by Bob Stone. On loan to Mia Lee, (555) 123-0003, through Climbing Club.",
-      "Lamp, yours. On loan to Mia Lee, (555) 123-0003.",
+      "Axe, yours. On loan to Mia Lee, (555) 223-0003, through Climbing Club.",
+      "Cord, owned by Bob Stone. On loan to Mia Lee, (555) 223-0003, through Climbing Club.",
+      "Lamp, yours. On loan to Mia Lee, (555) 223-0003.",
     ]);
   });
 
@@ -396,6 +396,39 @@ describe("focus after an action", () => {
 });
 
 describe("two changes in flight", () => {
+  it("moves focus to the heading when a later action removes its button last", async () => {
+    const approve = held();
+    const markReturned = held();
+    let lists: State | undefined;
+    const backend = liveBackend((state) => {
+      lists = state;
+      return {
+        "POST /api/inventories/7/items/20/approve/": approve.route,
+        "POST /api/items/21/return/": markReturned.route,
+      };
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Approve: Rope" }));
+    const button = screen.getByRole("button", { name: "Mark returned: Axe" });
+    button.focus();
+    fireEvent.click(button);
+    await waitFor(() => expect(backend.requests("POST /api/items/21/return/")).toHaveLength(1));
+    const lendingLoads = () => backend.keys().filter((key) => key === "GET /api/lending/");
+
+    approve.respond(empty(204));
+    await waitFor(() => expect(lendingLoads()).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+    expect(button).toHaveFocus();
+
+    markReturned.respond(() => {
+      lists!.lending = lists!.lending.filter((item) => item.id !== AXE.id);
+      return empty(204)({});
+    });
+
+    await waitFor(() => expect(button).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Loans" })).toHaveFocus());
+  });
+
   it("shows no message for the older change when its reply comes last", async () => {
     const approve = held();
     liveBackend((state) => ({

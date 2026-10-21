@@ -149,6 +149,48 @@ describe("pending invites", () => {
   });
 });
 
+describe("form errors", () => {
+  it("clears the create form's errors when an invite is answered", async () => {
+    signedIn({
+      "GET /api/invites/": json(200, [INVITE]),
+      "POST /api/inventories/": json(400, { name: ["This field is required."] }),
+      "POST /api/invites/30/decline/": empty(204),
+    });
+    renderAt("/manage/inventories");
+    await screen.findByText("You are not in any inventory yet.");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    const name = screen.getByLabelText("Inventory name");
+    await waitFor(() => expect(name).toHaveAccessibleDescription("This field is required."));
+
+    fireEvent.click(screen.getByRole("button", { name: "Decline invite to Camping Crew" }));
+
+    await waitFor(() => expect(name).not.toHaveAccessibleDescription());
+    expect(within(section("My inventories")).queryByRole("alert")).toBeNull();
+  });
+
+  it("clears an invite refusal when an inventory is created", async () => {
+    signedIn({
+      "GET /api/invites/": json(200, [INVITE]),
+      "POST /api/invites/30/accept/": json(404, { detail: "Invite not found." }),
+      "POST /api/inventories/": json(400, { name: ["This field is required."] }),
+    });
+    renderAt("/manage/inventories");
+    fireEvent.click(await screen.findByRole("button", { name: "Accept invite to Camping Crew" }));
+    expect(await within(section("Invites")).findByRole("alert")).toHaveTextContent(
+      "Invite not found.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Inventory name")).toHaveAccessibleDescription(
+        "This field is required.",
+      ),
+    );
+    expect(within(section("Invites")).queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("two changes in flight", () => {
   const SECOND_INVITE = { ...INVITE, id: 31 };
 

@@ -48,14 +48,14 @@ describe("RequireAuth", () => {
     renderAt("/somewhere?tab=2");
 
     fireEvent.change(await screen.findByLabelText("Phone number"), {
-      target: { value: "(555) 123-4567" },
+      target: { value: "(555) 223-4567" },
     });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
 
     expect(await screen.findByText("At /somewhere?tab=2")).toBeInTheDocument();
     expect(backend.requests("POST /api/auth/login/")).toEqual([
-      { phone_number: "(555) 123-4567", password: "pw" },
+      { phone_number: "(555) 223-4567", password: "pw" },
     ]);
   });
 

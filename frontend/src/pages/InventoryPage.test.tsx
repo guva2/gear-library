@@ -12,11 +12,11 @@ const URL = "/api/inventories/7/";
 const AVAILABLE = { loan_status: "available", borrowed_by_me: false, borrower: null } as const;
 const PHONE_NUMBER = /\(?[0-9]{3}\)? ?[0-9]{3}-?[0-9]{4}/;
 
-const BOB = { id: 2, first_name: "Bob", last_name: "Stone", phone_number: "5551230002" };
-const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5551230003" };
+const BOB = { id: 2, first_name: "Bob", last_name: "Stone", phone_number: "5552230002" };
+const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5552230003" };
 const INVITE = {
   id: 40,
-  invitee: { phone_number: "5551230004" },
+  invitee: { phone_number: "5552230004" },
   invited_by: { first_name: "Bob", last_name: "Stone" },
 };
 
@@ -24,9 +24,9 @@ const INVITE = {
 // Dee and Eve can be invited.
 const CONNECTIONS = [
   BOB,
-  { id: 4, first_name: "Cal", last_name: "Reyes", phone_number: "5551230004" },
-  { id: 5, first_name: "Dee", last_name: "Park", phone_number: "5551230005" },
-  { id: 6, first_name: "Eve", last_name: "Moss", phone_number: "5551230006" },
+  { id: 4, first_name: "Cal", last_name: "Reyes", phone_number: "5552230004" },
+  { id: 5, first_name: "Dee", last_name: "Park", phone_number: "5552230005" },
+  { id: 6, first_name: "Eve", last_name: "Moss", phone_number: "5552230006" },
 ].map((user) => ({ id: 100 + user.id, status: "accepted", user }));
 
 function members(role: Role) {
@@ -68,7 +68,7 @@ function region(name: string) {
 describe("as a member", () => {
   // Names only. The extra phone number checks that the page renders nothing but names.
   const NAMES = [
-    { first_name: "Olive", last_name: "Grant", phone_number: "5551230009" },
+    { first_name: "Olive", last_name: "Grant", phone_number: "5552230009" },
     { first_name: "Bob", last_name: "Stone" },
   ];
 
@@ -108,12 +108,12 @@ describe("as an admin", () => {
 
     const rows = within(region("Members")).getAllByRole("row").slice(1);
     expect(rows.map((row) => row.textContent)).toEqual([
-      "Ada Lovelace(555) 123-4567admin",
-      "Bob Stone(555) 123-0002admin",
-      "Mia Lee(555) 123-0003member",
+      "Ada Lovelace(555) 223-4567admin",
+      "Bob Stone(555) 223-0002admin",
+      "Mia Lee(555) 223-0003member",
     ]);
-    expect(within(region("Pending invites")).getByText(/123-0004/)).toHaveTextContent(
-      "(555) 123-0004, invited by Bob Stone",
+    expect(within(region("Pending invites")).getByText(/223-0004/)).toHaveTextContent(
+      "(555) 223-0004, invited by Bob Stone",
     );
   });
 
@@ -144,13 +144,13 @@ describe("as an admin", () => {
 
     const picker = screen.getByRole("combobox", { name: "Connection" });
     expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Dee Park, (555) 123-0005",
-      "Eve Moss, (555) 123-0006",
+      "Dee Park, (555) 223-0005",
+      "Eve Moss, (555) 223-0006",
     ]);
   });
 
   it("invites the chosen connection and reloads the invites and the picker", async () => {
-    const EVE_INVITE = { ...INVITE, id: 41, invitee: { phone_number: "5551230006" } };
+    const EVE_INVITE = { ...INVITE, id: 41, invitee: { phone_number: "5552230006" } };
     let invites = [INVITE];
     const backend = asRole("admin", {
       [`GET ${URL}invites/`]: () => json(200, invites)({}),
@@ -172,7 +172,7 @@ describe("as an admin", () => {
     expect(backend.requests(`POST ${URL}invites/`)).toEqual([{ user_id: 6 }]);
     const picker = screen.getByRole("combobox", { name: "Connection" });
     expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Dee Park, (555) 123-0005",
+      "Dee Park, (555) 223-0005",
     ]);
   });
 
@@ -232,7 +232,7 @@ describe("as an admin", () => {
     await waitFor(() => expect(screen.queryByRole("combobox", { name: "Connection" })).toBeNull());
   });
 
-  const DEE_INVITE = { ...INVITE, id: 42, invitee: { phone_number: "5551230005" } };
+  const DEE_INVITE = { ...INVITE, id: 42, invitee: { phone_number: "5552230005" } };
 
   it("names the conflicting connection in the section alert after it leaves the picker", async () => {
     let invites = [INVITE];
@@ -359,7 +359,7 @@ describe("as an admin", () => {
     });
     await open();
 
-    fireEvent.click(screen.getByRole("button", { name: "Revoke invite for (555) 123-0004" }));
+    fireEvent.click(screen.getByRole("button", { name: "Revoke invite for (555) 223-0004" }));
 
     expect(await screen.findByText("No pending invites.")).toBeInTheDocument();
     expect(backend.requests("POST /api/invites/40/revoke/")).toHaveLength(1);
@@ -821,7 +821,7 @@ describe("borrowing", () => {
   const ROPE: ListedItem = { id: 20, name: "Rope", description: "", owner: BOBS, ...AVAILABLE };
   const TENT: ListedItem = { ...ROPE, id: 21, name: "Tent", loan_status: "requested" };
   const STOVE: ListedItem = { ...ROPE, id: 22, name: "Stove", loan_status: "on_loan" };
-  const MIAS_PHONE = "(555) 123-0003";
+  const MIAS_PHONE = "(555) 223-0003";
 
   function withListed(role: Role, listed: () => ListedItem[], routes: Routes = {}) {
     return asRole(role, {
@@ -853,8 +853,8 @@ describe("borrowing", () => {
       expect(within(itemFor("Rope")).getByText("Available")).toBeVisible();
       expect(within(itemFor("Tent")).getByText("Requested")).toBeVisible();
       expect(within(itemFor("Stove")).getByText("On loan")).toBeVisible();
-      expect(buttonNames()).toEqual(["Ask to borrow Rope"]);
-      expect(screen.getByRole("button", { name: "Ask to borrow Rope" })).toHaveTextContent(
+      expect(buttonNames()).toEqual(["Ask to borrow: Rope"]);
+      expect(screen.getByRole("button", { name: "Ask to borrow: Rope" })).toHaveTextContent(
         /^Ask to borrow$/,
       );
     });
@@ -869,7 +869,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow Rope" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow: Rope" }));
 
       expect(await within(itemFor("Rope")).findByText("Waiting for approval")).toBeVisible();
       expect(buttonNames()).toEqual(["Cancel request: Rope"]);
@@ -901,7 +901,7 @@ describe("borrowing", () => {
       });
       await open();
 
-      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow Rope" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask to borrow: Rope" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "This item has already been requested or is on loan.",

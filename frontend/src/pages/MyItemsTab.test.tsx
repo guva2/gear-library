@@ -7,7 +7,7 @@ import { expectLabelsInNames, renderAt, settle } from "../test-render";
 type Routes = Parameters<typeof fakeBackend>[0];
 
 const NO_LOAN = { loan_status: "available", borrower: null, loan_inventory: null } as const;
-const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5551230003" };
+const MIA = { id: 3, first_name: "Mia", last_name: "Lee", phone_number: "5552230003" };
 
 const ROPE: Item = {
   id: 20,
@@ -125,6 +125,50 @@ describe("page-level errors", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit Axe" }));
     fireEvent.click(within(itemFor("Axe")).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("form errors", () => {
+  it("clears the add form's errors when another change starts on the page", async () => {
+    liveBackend((state) => ({
+      "POST /api/items/": json(400, { name: ["This field is required."] }),
+      "DELETE /api/items/21/": () => {
+        state.items = [ROPE];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    const add = region("Add an item");
+    fireEvent.click(within(add).getByRole("button", { name: "Add" }));
+    const name = within(add).getByLabelText("Name");
+    await waitFor(() => expect(name).toHaveAccessibleDescription("This field is required."));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Axe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
+
+    await waitFor(() => expect(name).not.toHaveAccessibleDescription());
+  });
+
+  it("clears the edit form's errors when another change starts on the page", async () => {
+    liveBackend((state) => ({
+      "PATCH /api/items/20/": json(400, { name: ["This field may not be blank."] }),
+      "POST /api/items/21/use/": () => {
+        state.items = [{ ...AXE, loan_status: "on_loan", borrower: ADA }, ROPE];
+        return empty(204)({});
+      },
+    }));
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Rope" }));
+    const form = itemFor("Rope");
+    fill(form, "Name", "");
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    const name = within(form).getByLabelText("Name");
+    await waitFor(() => expect(name).toHaveAccessibleDescription("This field may not be blank."));
+
+    fireEvent.click(screen.getByRole("button", { name: "Use it myself: Axe" }));
+
+    await waitFor(() => expect(name).not.toHaveAccessibleDescription());
+    expect(within(form).queryByRole("alert")).toBeNull();
   });
 });
 
@@ -308,15 +352,15 @@ describe("loans of my items", () => {
 
     expect(
       within(itemFor("Axe")).getByText(
-        "Requested by Mia Lee, (555) 123-0003, through Climbing Club.",
+        "Requested by Mia Lee, (555) 223-0003, through Climbing Club.",
       ),
     ).toBeVisible();
     expect(
       within(itemFor("Rope")).getByText(
-        "On loan to Mia Lee, (555) 123-0003, through Climbing Club.",
+        "On loan to Mia Lee, (555) 223-0003, through Climbing Club.",
       ),
     ).toBeVisible();
-    expect(within(itemFor("Tent")).getByText("On loan to Mia Lee, (555) 123-0003.")).toBeVisible();
+    expect(within(itemFor("Tent")).getByText("On loan to Mia Lee, (555) 223-0003.")).toBeVisible();
   });
 
   it("says when an item is available", async () => {

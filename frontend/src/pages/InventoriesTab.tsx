@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { apiFetch, readErrors, type FieldErrors } from "../api";
 import { Field, FormErrors, unreachable, useFocusFirstInvalid, useLatestChange } from "../forms";
@@ -21,7 +21,14 @@ async function loadLists(signal: AbortSignal): Promise<Lists> {
 /** The signed-in user's inventories, the form to create one, and their pending invites. */
 export default function InventoriesTab() {
   const [lists, reload] = useLoad(loadLists);
-  const start = useLatestChange();
+  // Counts the changes started from this tab. Each form clears its errors when the count
+  // changes.
+  const [sent, setSent] = useState(0);
+  const latest = useLatestChange();
+  const start = () => {
+    setSent((count) => count + 1);
+    return latest();
+  };
 
   return (
     <>
@@ -29,8 +36,13 @@ export default function InventoriesTab() {
       {lists.status === "error" && <p role="alert">Could not load your inventories.</p>}
       {lists.status === "ok" && (
         <>
-          <InventoryList inventories={lists.data.inventories} reload={reload} start={start} />
-          <Invites invites={lists.data.invites} reload={reload} start={start} />
+          <InventoryList
+            inventories={lists.data.inventories}
+            reload={reload}
+            start={start}
+            sent={sent}
+          />
+          <Invites invites={lists.data.invites} reload={reload} start={start} sent={sent} />
         </>
       )}
     </>
@@ -40,13 +52,18 @@ export default function InventoriesTab() {
 /** Starts a change; the check it returns says whether the change is still the latest. */
 type StartChange = () => () => boolean;
 
-interface InventoryListProps {
-  inventories: Inventory[];
+interface ChangeProps {
   reload: () => void;
   start: StartChange;
+  /** The tab's count of changes started. A change from elsewhere on the tab clears the errors. */
+  sent: number;
 }
 
-function InventoryList({ inventories, reload, start }: InventoryListProps) {
+interface InventoryListProps extends ChangeProps {
+  inventories: Inventory[];
+}
+
+function InventoryList({ inventories, reload, start, sent }: InventoryListProps) {
   return (
     <section aria-labelledby="my-inventories">
       <h3 id="my-inventories">My inventories</h3>
@@ -62,14 +79,15 @@ function InventoryList({ inventories, reload, start }: InventoryListProps) {
           ))}
         </ul>
       )}
-      <CreateInventory reload={reload} start={start} />
+      <CreateInventory reload={reload} start={start} sent={sent} />
     </section>
   );
 }
 
-function CreateInventory({ reload, start }: { reload: () => void; start: StartChange }) {
+function CreateInventory({ reload, start, sent }: ChangeProps) {
   const navigate = useNavigate();
   const [errors, setErrors] = useState<FieldErrors>({});
+  useEffect(() => setErrors({}), [sent]);
   const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -104,14 +122,13 @@ function CreateInventory({ reload, start }: { reload: () => void; start: StartCh
   );
 }
 
-interface InvitesProps {
+interface InvitesProps extends ChangeProps {
   invites: MyInvite[];
-  reload: () => void;
-  start: StartChange;
 }
 
-function Invites({ invites, reload, start }: InvitesProps) {
+function Invites({ invites, reload, start, sent }: InvitesProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  useEffect(() => setErrors({}), [sent]);
 
   async function answer(invite: MyInvite, action: "accept" | "decline") {
     const isLatest = start();

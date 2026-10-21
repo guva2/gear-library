@@ -473,7 +473,7 @@ function LoanButtons({ userId, onLoanChange, ...holding }: LoanButtonsProps) {
   } else if (item.loan_status === "available") {
     buttons.push({
       label: "Ask to borrow",
-      name: `Ask to borrow ${item.name}`,
+      name: `Ask to borrow: ${item.name}`,
       onClick: () => onLoanChange(`${path}borrow/`),
     });
   }

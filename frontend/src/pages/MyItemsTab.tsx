@@ -40,7 +40,7 @@ function loanState(item: Item, userId: number | undefined): string {
 /** Every item the signed-in user owns, listed or not. */
 export default function MyItemsTab() {
   const [page, reload] = useLoad((signal) => getJson<Item[]>("/api/items/", signal));
-  const { errors, setErrors, change, begin } = useChange(reload);
+  const { errors, setErrors, change, begin, sent } = useChange(reload);
 
   return (
     <>
@@ -52,6 +52,7 @@ export default function MyItemsTab() {
           items={page.data}
           reload={reload}
           onSubmit={begin}
+          sent={sent}
           onGone={(errors) => {
             if (errors) setErrors(errors);
             reload();
@@ -63,7 +64,7 @@ export default function MyItemsTab() {
           onUse={(item) => change(`/api/items/${item.id}/use/`, "POST")}
         />
       )}
-      <AddItem reload={reload} onSubmit={begin} />
+      <AddItem reload={reload} onSubmit={begin} sent={sent} />
     </>
   );
 }
@@ -73,6 +74,8 @@ interface ItemListProps {
   reload: () => void;
   /** Called when an edit is submitted. Returns whether the edit is still the latest change. */
   onSubmit: () => () => boolean;
+  /** The page's count of changes started. A change from elsewhere on the page clears the errors. */
+  sent: number;
   /**
    * Called when an edit was refused because the item no longer exists, with its errors, or
    * `null` when a later change was sent meanwhile.
@@ -88,6 +91,7 @@ function ItemList({
   items,
   reload,
   onSubmit,
+  sent,
   onGone,
   onDelete,
   onReturn,
@@ -126,6 +130,7 @@ function ItemList({
                 <EditItem
                   item={item}
                   onSubmit={onSubmit}
+                  sent={sent}
                   onSaved={() => {
                     close(item);
                     reload();
@@ -225,13 +230,16 @@ function LoanButton({ item, inUse, onReturn, onUse }: LoanButtonProps) {
 interface EditItemProps {
   item: Item;
   onSubmit: () => () => boolean;
+  /** The page's count of changes started. A change from elsewhere on the page clears the errors. */
+  sent: number;
   onSaved: () => void;
   onGone: (errors: FieldErrors | null) => void;
   onCancel: () => void;
 }
 
-function EditItem({ item, onSubmit, onSaved, onGone, onCancel }: EditItemProps) {
+function EditItem({ item, onSubmit, sent, onSaved, onGone, onCancel }: EditItemProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  useEffect(() => setErrors({}), [sent]);
   const formRef = useFocusFirstInvalid(errors);
 
   useEffect(() => {
@@ -286,10 +294,13 @@ interface AddItemProps {
   reload: () => void;
   /** Called when the form is submitted. Returns whether it is still the latest change. */
   onSubmit: () => () => boolean;
+  /** The page's count of changes started. A change from elsewhere on the page clears the errors. */
+  sent: number;
 }
 
-function AddItem({ reload, onSubmit }: AddItemProps) {
+function AddItem({ reload, onSubmit, sent }: AddItemProps) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  useEffect(() => setErrors({}), [sent]);
   const formRef = useFocusFirstInvalid(errors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {

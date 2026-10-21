@@ -56,20 +56,27 @@ interface Action {
 export default function LoansPage() {
   const { user } = useAuth();
   const [page, reload] = useLoad(loadPage);
-  const { errors, change } = useChange(reload);
-  // The button used last. A reload that unmounts it, by removing its item or moving the
-  // item to another section, would drop focus to the page body.
-  const actedOn = useRef<HTMLButtonElement | null>(null);
+  // The button used last, and whether its change has replied. A reload that unmounts it, by
+  // removing its item or moving the item to another section, would drop focus to the page
+  // body. It is watched until the reload after its own reply: a reload after an older
+  // change's reply can come first and leave it in place.
+  const actedOn = useRef<{ button: HTMLButtonElement; replied: boolean } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const { errors, change } = useChange((latest) => {
+    if (latest && actedOn.current) actedOn.current.replied = true;
+    reload();
+  });
 
   useEffect(() => {
-    if (page.status === "loading" || actedOn.current === null) return;
-    if (!actedOn.current.isConnected) heading.current?.focus();
+    const acted = actedOn.current;
+    if (page.status === "loading" || acted === null) return;
+    if (acted.button.isConnected && !acted.replied) return;
+    if (!acted.button.isConnected) heading.current?.focus();
     actedOn.current = null;
   }, [page]);
 
   function act(button: HTMLButtonElement, action: Action) {
-    actedOn.current = button;
+    actedOn.current = { button, replied: false };
     action.run();
   }
 

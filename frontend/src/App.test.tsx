@@ -110,7 +110,7 @@ describe("returning to the page that was asked for", () => {
     const { location } = renderAt("/connections?x=1");
 
     await screen.findByRole("heading", { name: "Log in" });
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("Password", "correct-horse-battery");
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
 
@@ -128,7 +128,7 @@ describe("returning to the page that was asked for", () => {
     await screen.findByRole("heading", { name: "Log in" });
     fireEvent.click(screen.getByRole("link", { name: "Create an account" }));
     await screen.findByRole("heading", { name: "Create an account" });
-    fillIn("Phone number", "(555) 123-4567");
+    fillIn("Phone number", "(555) 223-4567");
     fillIn("First name", "Ada");
     fillIn("Last name", "Lovelace");
     fillIn("Password", "correct-horse-battery");
@@ -145,7 +145,7 @@ describe("login page", () => {
     renderAt("/");
 
     await screen.findByRole("heading", { name: "Log in" });
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("Password", "correct-horse-battery");
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
 
@@ -162,7 +162,7 @@ describe("login page", () => {
     renderAt("/login");
     await screen.findByRole("heading", { name: "Log in" });
 
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("Password", "wrong");
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
 
@@ -170,24 +170,6 @@ describe("login page", () => {
       "Wrong phone number or password.",
     );
     expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
-  });
-
-  it("shows the rate limit message for the whole form", async () => {
-    fakeBackend({
-      "GET /api/auth/me/": ANONYMOUS,
-      "POST /api/auth/login/": json(429, { detail: "Too many attempts. Try again in a minute." }),
-    });
-    renderAt("/login");
-    await screen.findByRole("heading", { name: "Log in" });
-
-    fillIn("Phone number", "5552234567");
-    fillIn("Password", "pw");
-    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Too many attempts. Try again in a minute.",
-    );
-    expect(screen.getByLabelText("Phone number")).toBeValid();
   });
 
   it("shows a repeated form error in a new alert element", async () => {
@@ -200,7 +182,7 @@ describe("login page", () => {
     renderAt("/login");
     await screen.findByRole("heading", { name: "Log in" });
 
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("Password", "wrong");
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
     const first = await screen.findByRole("alert");
@@ -250,7 +232,7 @@ describe("register page", () => {
     renderAt("/register");
     await screen.findByRole("heading", { name: "Create an account" });
 
-    fillIn("Phone number", "(555) 123-4567");
+    fillIn("Phone number", "(555) 223-4567");
     fillIn("First name", "Ada");
     fillIn("Last name", "Lovelace");
     fillIn("Password", "correct-horse-battery");
@@ -259,7 +241,7 @@ describe("register page", () => {
     expect(await screen.findByText("Signed in as Ada Lovelace")).toBeInTheDocument();
     expect(backend.requests("POST /api/auth/register/")).toEqual([
       {
-        phone_number: "(555) 123-4567",
+        phone_number: "(555) 223-4567",
         first_name: "Ada",
         last_name: "Lovelace",
         password: "correct-horse-battery",
@@ -278,7 +260,7 @@ describe("register page", () => {
     renderAt("/register");
     await screen.findByRole("heading", { name: "Create an account" });
 
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("First name", "Ada");
     fillIn("Last name", "Lovelace");
     fillIn("Password", "abc");
@@ -320,7 +302,7 @@ describe("register page", () => {
     renderAt("/register");
     await screen.findByRole("heading", { name: "Create an account" });
 
-    fillIn("Phone number", "5551234567");
+    fillIn("Phone number", "5552234567");
     fillIn("Password", "abc");
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 

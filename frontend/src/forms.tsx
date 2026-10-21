@@ -108,16 +108,20 @@ export function useLatestChange(): () => () => boolean {
 /**
  * Holds a page's errors and `change`, which sends a change and reloads either way: a refusal
  * may come from a change someone else made, so the page shows the current state with it.
- * `begin` clears the errors and starts a change for a form that sends its own request; it
- * returns whether that change is still the page's latest. A reply to an older change sets
- * no errors, but still reloads, since the change may have gone through.
+ * `reload` is told whether the reply is to the page's latest change. `begin` clears the
+ * errors and starts a change for a form that sends its own request; it returns whether that
+ * change is still the page's latest. A reply to an older change sets no errors, but still
+ * reloads, since the change may have gone through. `sent` counts the changes started, by
+ * `change` or `begin`, and goes up by one at each start.
  */
-export function useChange(reload: () => void) {
+export function useChange(reload: (latest: boolean) => void) {
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [sent, setSent] = useState(0);
   const start = useLatestChange();
 
   function begin() {
     setErrors({});
+    setSent((count) => count + 1);
     return start();
   }
 
@@ -129,11 +133,11 @@ export function useChange(reload: () => void) {
         const errors = await readErrors(response, []);
         if (isLatest()) setErrors(errors);
       }
-      reload();
+      reload(isLatest());
     } catch {
       if (isLatest()) setErrors(unreachable());
     }
   }
 
-  return { errors, setErrors, change, begin };
+  return { errors, setErrors, change, begin, sent };
 }
