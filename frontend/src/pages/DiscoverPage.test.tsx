@@ -404,6 +404,54 @@ describe("discover search", () => {
     ]);
   });
 
+  it("drops a NUL in the URL's query instead of sending it", async () => {
+    const backend = liveBackend(() => ({ [searchUrl("axe")]: json(200, [AXE]) }));
+
+    await open("/?q=a%00xe");
+
+    expect(screen.getByRole("searchbox", { name: "Search" })).toHaveValue("axe");
+    expect(cardNames()).toEqual(["Axe"]);
+    expect(backend.keys().filter((key) => key.includes("%00"))).toEqual([]);
+  });
+
+  it("drops a NUL typed or pasted into the box", async () => {
+    liveBackend(() => ({ [searchUrl("axe")]: json(200, [AXE]) }));
+    const page = await open();
+
+    type("a\0xe");
+    wait(300);
+
+    await waitFor(() => expect(cardNames()).toEqual(["Axe"]));
+    expect(screen.getByRole("searchbox", { name: "Search" })).toHaveValue("axe");
+    expect(page.location().path).toBe("/?q=axe");
+  });
+
+  it("counts an emoji as one character, so it lists everything without a search", async () => {
+    const backend = fakeBackend({
+      "GET /api/auth/me/": json(200, ADA),
+      "GET /api/discover/": json(200, []),
+    });
+
+    await open(`/?${new URLSearchParams({ q: "😀" })}`);
+
+    expect(screen.getByText(/^Nothing to borrow right now\./)).toBeInTheDocument();
+    expect(backend.keys().filter((key) => key.includes("?"))).toEqual([]);
+  });
+
+  // The server strips what Python's str.strip() does: U+0085 but not U+FEFF.
+  it.each([
+    ["U+0085", "\u0085a", null],
+    ["U+001C", "\u001ca", null],
+    ["U+FEFF", "\ufeffa", "\ufeffa"],
+  ])("treats %s at the ends of the query as the server does", async (_, text, sent) => {
+    const backend = liveBackend(() => (sent ? { [searchUrl(sent)]: json(200, [AXE]) } : {}));
+
+    await open(`/?${new URLSearchParams({ q: text })}`);
+
+    const searches = backend.keys().filter((key) => key.includes("?"));
+    expect(searches).toEqual(sent ? [searchUrl(sent)] : []);
+  });
+
   it("says when nothing matches the query", async () => {
     liveBackend(() => ({ [searchUrl("xyz")]: json(200, []) }));
 

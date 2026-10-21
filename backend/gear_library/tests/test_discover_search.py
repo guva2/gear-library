@@ -80,14 +80,26 @@ class TestSearch:
     def test_a_description_match_comes_after_name_matches(self, people, gear):
         assert search(people, "tent") == ["Two-person tent", "Footprint"]
 
+    def test_a_weak_name_match_comes_before_a_perfect_description_match(self, people, gear):
+        # word_similarity("climing", "Climbing harness") is about 0.55; the description
+        # "Climing tips" scores 1.0.
+        list_in(
+            people["climbing"],
+            Item.objects.create(owner=people["olive"], name="Rope", description="Climing tips"),
+        )
+
+        assert search(people, "climing") == ["Climbing harness", "Rope"]
+
     def test_description_matches_are_ordered_by_description_score(self, people, gear):
-        for name, description in [("Aardvark", "Spare tents"), ("Zebra", "The tent")]:
+        # For "stove", "Stakes" scores 0.33 on its name: below the name threshold, so only
+        # the descriptions (0.83 and 1.0) order the two.
+        for name, description in [("Stakes", "Gas stoves"), ("Mug", "A stove")]:
             list_in(
                 people["climbing"],
                 Item.objects.create(owner=people["olive"], name=name, description=description),
             )
 
-        assert search(people, "tent")[-2:] == ["Zebra", "Aardvark"]
+        assert search(people, "stove") == ["Mug", "Stakes"]
 
     def test_a_weak_description_match_is_left_out(self, people, gear):
         # word_similarity("pad", "... parks") is 0.5: enough for a name, not a description.

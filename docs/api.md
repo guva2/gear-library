@@ -551,7 +551,7 @@ No body. Cancels the caller's pending request.
 
 | Method | Path | Who | Main errors |
 |---|---|---|---|
-| `GET` | `/api/discover/?q=` | Logged in. Items the caller can only borrow. `q` is optional and searches them. | |
+| `GET` | `/api/discover/?q=` | Logged in. Items the caller can only borrow. `q` is optional and searches them. | `400`: `q` contains a NUL character. |
 | `GET` | `/api/lending/` | Logged in. Requests and loans the caller may answer or close. | |
 
 Both count only the inventories where the caller is an active member: a pending invite
@@ -582,8 +582,9 @@ shown.
 
 `GET /api/discover/?q=tent` returns the Discover items that match `q`, in the same
 [Discover item](#discover-item) form. A missing `q`, or one shorter than 2 characters
-after stripping spaces, returns the full list. A `q` containing a NUL character (`%00`)
-returns `400` with `{"q": ["Cannot contain a NUL character."]}`.
+(Unicode code points) after Python's `str.strip()`, returns the full list. A `q`
+containing a NUL character (`%00`) returns `400` with
+`{"q": ["Cannot contain a NUL character."]}`.
 
 - Matching uses Postgres `pg_trgm` word similarity: how well `q` matches the closest
   part of the text, so a partial word ("sleep" finds "Sleeping bag") and a dropped or
@@ -592,8 +593,9 @@ returns `400` with `{"q": ["Cannot contain a NUL character."]}`.
   description has 0.6 or more.
 - Only letters and digits count. `%` and `_` have no special meaning.
 - Order: available items first, then the rest. Within each group, by the name's word
-  similarity, then the description's, then the similarity of `q` to the whole name, then
-  by name.
+  similarity, counted only when the name matches (so every name match comes before every
+  description-only match), then the description's, then the similarity of `q` to the
+  whole name, then by name.
 
 ### Lending item
 

@@ -224,11 +224,16 @@ class ItemQuerySet(models.QuerySet):
 
     def matching(self, q):
         """The items whose name or description matches `q`, annotated with their scores:
-        `name_match` and `description_match` (word similarity of `q` to each) and
+        `name_match` (word similarity of `q` to the name, or 0 when the name does not
+        match, so a name below the threshold cannot outrank a better description),
+        `description_match` (word similarity of `q` to the description) and
         `name_similarity` (similarity of `q` to the whole name). Each side of the
         filter's OR has a `%>` operator, so the trigram indexes can serve it."""
         return self.annotate(
-            name_match=TrigramWordSimilarity(q, "name"),
+            name_match=models.Case(
+                models.When(name__trigram_word_similar=q, then=TrigramWordSimilarity(q, "name")),
+                default=models.Value(0.0),
+            ),
             description_match=TrigramWordSimilarity(q, "description"),
             name_similarity=TrigramSimilarity("name", q),
         ).filter(

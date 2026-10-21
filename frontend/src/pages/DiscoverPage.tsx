@@ -7,9 +7,20 @@ import { useLoad } from "../load";
 
 /** How long typing must pause before the search runs. */
 const SEARCH_DELAY_MS = 300;
-/** The page sends `q` only when it is at least this long once stripped; shorter lists
- * everything (see `docs/api.md`). */
+/** The page sends `q` only when it has at least this many code points once stripped;
+ * shorter lists everything (see `docs/api.md`). */
 const MIN_QUERY_LENGTH = 2;
+/** The characters Python's `str.strip()` removes, as the server does from `q` (see
+ * `docs/api.md`). Unlike `String.trim()`, it includes U+001C to U+001F and U+0085, and
+ * leaves U+FEFF. */
+const SPACE =
+  /[\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/.source;
+const OUTER_SPACE = new RegExp(`^${SPACE}+|${SPACE}+$`, "g");
+
+/** `text` without NUL characters: a `q` holding one is a `400` (see `docs/api.md`). */
+function withoutNul(text: string) {
+  return text.replaceAll("\0", "");
+}
 
 /** The items found, with the query that found them. */
 interface Found {
@@ -26,13 +37,13 @@ async function loadItems(query: string, signal: AbortSignal): Promise<Found> {
 export default function DiscoverPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const q = searchParams.get("q") ?? "";
+  const q = withoutNul(searchParams.get("q") ?? "");
   // What the box shows. It reaches the URL once typing pauses.
   const [text, setText] = useState(q);
   // The last `q` this page wrote: any other `q` came from navigation and replaces the text.
   const written = useRef(q);
-  const trimmed = q.trim();
-  const query = trimmed.length >= MIN_QUERY_LENGTH ? trimmed : "";
+  const trimmed = q.replace(OUTER_SPACE, "");
+  const query = [...trimmed].length >= MIN_QUERY_LENGTH ? trimmed : "";
   const [found, reload] = useLoad((signal) => loadItems(query, signal), query);
   const { errors, change } = useChange(reload);
   // The item whose control was used last: only its card takes focus when it changes.
@@ -98,7 +109,7 @@ export default function DiscoverPage() {
           type="search"
           value={text}
           onChange={(event) => {
-            setText(event.target.value);
+            setText(withoutNul(event.target.value));
             // Typing is the latest action: a borrow still in flight must not take focus.
             setActedOn(null);
           }}
