@@ -1,47 +1,136 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useLocation, useSearchParams } from "react-router";
 import { FormErrors, useChange } from "../forms";
 import { fullName, getJson } from "../inventories";
 import { borrowerText, LOAN_STATUS_LABELS, type DiscoverItem } from "../items";
 import { useLoad } from "../load";
 
-function loadItems(signal: AbortSignal): Promise<DiscoverItem[]> {
-  return getJson<DiscoverItem[]>("/api/discover/", signal);
+/** How long typing must pause before the search runs. */
+const SEARCH_DELAY_MS = 300;
+/** The page sends `q` only when it has at least this many code points once stripped;
+ * shorter lists everything (see `docs/api.md`). */
+const MIN_QUERY_LENGTH = 2;
+/** The characters Python's `str.strip()` removes, as the server does from `q` (see
+ * `docs/api.md`). Unlike `String.trim()`, it includes U+001C to U+001F and U+0085, and
+ * leaves U+FEFF. */
+const SPACE =
+  /[\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/.source;
+const OUTER_SPACE = new RegExp(`^${SPACE}+|${SPACE}+$`, "g");
+
+/** `text` without NUL characters: a `q` holding one is a `400` (see `docs/api.md`). */
+function withoutNul(text: string) {
+  return text.replaceAll("\0", "");
 }
 
-/** The items the signed-in user can only borrow. */
+/** The items found, with the query that found them. */
+interface Found {
+  query: string;
+  items: DiscoverItem[];
+}
+
+async function loadItems(query: string, signal: AbortSignal): Promise<Found> {
+  const search = query ? `?${new URLSearchParams({ q: query })}` : "";
+  return { query, items: await getJson<DiscoverItem[]>(`/api/discover/${search}`, signal) };
+}
+
+/** The items the signed-in user can only borrow, narrowed by the search in `?q=`. */
 export default function DiscoverPage() {
-  const [items, reload] = useLoad(loadItems);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const q = withoutNul(searchParams.get("q") ?? "");
+  // What the box shows. It reaches the URL once typing pauses.
+  const [text, setText] = useState(q);
+  // The last `q` this page wrote: any other `q` came from navigation and replaces the text.
+  const written = useRef(q);
+  const trimmed = q.replace(OUTER_SPACE, "");
+  const query = [...trimmed].length >= MIN_QUERY_LENGTH ? trimmed : "";
+  const [found, reload] = useLoad((signal) => loadItems(query, signal), query);
   const { errors, change } = useChange(reload);
   // The item whose control was used last: only its card takes focus when it changes.
   const [actedOn, setActedOn] = useState<number | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
 
+  useEffect(() => {
+    if (q !== written.current) {
+      written.current = q;
+      setText(q);
+    }
+  }, [q]);
+
+  // Following any link here discards text still waiting for its delay. The page's own
+  // writes are marked and left alone.
+  useEffect(() => {
+    if (!location.state?.written) setText(q);
+    // Only a new location resets the box; `q` is read from the render that changed it.
+  }, [location.key]);
+
+  useEffect(() => {
+    if (text === q) return;
+    const timer = setTimeout(() => {
+      written.current = text;
+      setSearchParams(
+        (params) => {
+          const next = new URLSearchParams(params);
+          if (text) next.set("q", text);
+          else next.delete("q");
+          return next;
+        },
+        { replace: true, state: { written: true } },
+      );
+    }, SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [text, q, setSearchParams]);
+
+  // A new search is not a reaction to the last action, so it moves no focus.
+  useEffect(() => setActedOn(null), [query]);
+
   // The acted-on card unmounts when the reload drops its item, and focus would fall to the
   // page body.
   useEffect(() => {
-    if (actedOn !== null && items.status === "ok" && !items.data.some((i) => i.id === actedOn)) {
+    if (
+      actedOn !== null &&
+      found.status === "ok" &&
+      !found.data.items.some((i) => i.id === actedOn)
+    ) {
       heading.current?.focus();
       setActedOn(null);
     }
-  }, [items, actedOn]);
+  }, [found, actedOn]);
 
   return (
     <>
       <h2 ref={heading} tabIndex={-1}>
         Discover
       </h2>
+      <p role="search">
+        <label htmlFor="discover-search">Search</label>{" "}
+        <input
+          id="discover-search"
+          type="search"
+          value={text}
+          onChange={(event) => {
+            setText(withoutNul(event.target.value));
+            // Typing is the latest action: a borrow still in flight must not take focus.
+            setActedOn(null);
+          }}
+        />
+      </p>
       <FormErrors errors={errors} />
-      {items.status === "loading" && <p>Loading…</p>}
-      {items.status === "error" && <p role="alert">Could not load the items.</p>}
-      {items.status === "ok" &&
-        (items.data.length === 0 ? (
-          <p>
-            Nothing to borrow right now. Items others list in inventories where you are a member
-            show up here.
-          </p>
+      {found.status === "loading" && <p>Loading…</p>}
+      {found.status === "error" && <p role="alert">Could not load the items.</p>}
+      {found.status === "ok" &&
+        (found.data.items.length === 0 ? (
+          found.data.query ? (
+            <p>No items match “{found.data.query}”.</p>
+          ) : (
+            <p>
+              Nothing to borrow right now. Items others list in inventories where you are a
+              member show up here.
+            </p>
+          )
         ) : (
           <ul className="cards">
-            {items.data.map((item) => (
+            {found.data.items.map((item) => (
               <ItemCard
                 key={item.id}
                 item={item}

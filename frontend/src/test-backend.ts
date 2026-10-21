@@ -1,6 +1,8 @@
 import { vi } from "vitest";
 
 type Handler = (init: RequestInit) => Response;
+/** A route may also answer later, to hold a request in flight. */
+type Route = (init: RequestInit) => Response | Promise<Response>;
 
 export const ADA = {
   id: 1,
@@ -39,7 +41,7 @@ const DEFAULTS: Record<string, Handler> = {
  * Stubs `fetch` with handlers keyed by `"METHOD /path/"`. A request with no handler
  * rejects, so the test fails on whatever the page shows for an unreachable backend.
  */
-export function fakeBackend(routes: Record<string, Handler>) {
+export function fakeBackend(routes: Record<string, Route>) {
   const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => {
     const key = `${init.method ?? "GET"} ${url}`;
     const handler = routes[key] ?? DEFAULTS[key];
@@ -48,6 +50,8 @@ export function fakeBackend(routes: Record<string, Handler>) {
   });
   vi.stubGlobal("fetch", fetchMock);
   return {
+    /** Every request's key, in the order sent. */
+    keys: () => fetchMock.mock.calls.map(([url, init]) => `${init?.method ?? "GET"} ${url}`),
     requests: (key: string) =>
       fetchMock.mock.calls
         .filter(([url, init]) => `${init?.method ?? "GET"} ${url}` === key)

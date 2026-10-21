@@ -14,6 +14,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "rest_framework",
     "gear_library",
 ]
@@ -57,6 +58,9 @@ DATABASES = {
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
         # Each request is one transaction. DRF rolls it back when a view raises an error.
         "ATOMIC_REQUESTS": True,
+        # pg_trgm's `<%` and `%>` match at this word similarity or more. Set when the
+        # connection starts, so it holds before pg_trgm is loaded.
+        "OPTIONS": {"options": "-c pg_trgm.word_similarity_threshold=0.5"},
     }
 }
 

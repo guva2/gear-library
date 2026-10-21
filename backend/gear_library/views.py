@@ -11,6 +11,7 @@ from django.db.models import (
     Case,
     Exists,
     ExpressionWrapper,
+    F,
     OuterRef,
     Prefetch,
     Q,
@@ -596,7 +597,12 @@ def _visible_listings(user, roles=None):
 
 class DiscoverViewSet(ApiViewSet):
     """The items the caller can only borrow: listed in an inventory where the caller is a
-    `member`, and in none where they are an admin or owner."""
+    `member`, and in none where they are an admin or owner. `?q=` narrows them to the items
+    matching it (`ItemQuerySet.matching`). A `q` shorter than `MIN_QUERY_LENGTH` once
+    stripped is ignored: pg_trgm matches one letter to every word starting with it. A `q`
+    containing NUL is a 400, since Postgres cannot hold the character."""
+
+    MIN_QUERY_LENGTH = 2
 
     def list(self, request):
         user = request.user
@@ -611,12 +617,19 @@ class DiscoverViewSet(ApiViewSet):
             .exclude(owner=user)
             .select_related("owner")
             .prefetch_related(_visible_listings(user, [Role.MEMBER]))
-            .order_by(
-                Case(When(loan_status=LoanStatus.AVAILABLE, then=Value(0)), default=Value(1)),
-                "name",
-                "id",
-            )
         )
+        order = [Case(When(loan_status=LoanStatus.AVAILABLE, then=Value(0)), default=Value(1))]
+        q = request.query_params.get("q", "").strip()
+        if "\x00" in q:
+            raise ValidationError({"q": ["Cannot contain a NUL character."]})
+        if len(q) >= self.MIN_QUERY_LENGTH:
+            found = found.matching(q)
+            order += [
+                F("name_match").desc(),
+                F("description_match").desc(),
+                F("name_similarity").desc(),
+            ]
+        found = found.order_by(*order, "name", "id")
         serializer = DiscoverItemSerializer(found, many=True, context={"user": user})
         return Response(serializer.data)
 

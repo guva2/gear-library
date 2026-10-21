@@ -1,5 +1,7 @@
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import TrigramSimilarity, TrigramWordSimilarity
 from django.core.validators import RegexValidator
 from django.db import models
 
@@ -9,6 +11,10 @@ PHONE_NUMBER_PATTERN = r"^[0-9]{10}$"
 ONE_MEMBERSHIP_PER_USER = "gear_library_membership_one_per_user"
 ONE_CONNECTION_PER_PAIR = "gear_library_connection_one_per_pair"
 ONE_LISTING_PER_ITEM = "gear_library_inventoryitem_one_per_item"
+
+# A description matches a search at this word similarity or more. A name matches at
+# `pg_trgm.word_similarity_threshold`, set in `config/settings.py`.
+DESCRIPTION_MATCH = 0.6
 
 
 class UserManager(BaseUserManager):
@@ -216,6 +222,27 @@ class ItemQuerySet(models.QuerySet):
             loan_status=LoanStatus.REQUESTED, loan_inventory_id=inventory_id
         ).end_loan()
 
+    def matching(self, q):
+        """The items whose name or description matches `q`, annotated with their scores:
+        `name_match` (word similarity of `q` to the name, or 0 when the name does not
+        match, so a name below the threshold cannot outrank a better description),
+        `description_match` (word similarity of `q` to the description) and
+        `name_similarity` (similarity of `q` to the whole name). Each side of the
+        filter's OR has a `%>` operator, so the trigram indexes can serve it."""
+        return self.annotate(
+            name_match=models.Case(
+                models.When(name__trigram_word_similar=q, then=TrigramWordSimilarity(q, "name")),
+                default=models.Value(0.0),
+            ),
+            description_match=TrigramWordSimilarity(q, "description"),
+            name_similarity=TrigramSimilarity("name", q),
+        ).filter(
+            models.Q(name__trigram_word_similar=q)
+            | models.Q(
+                description__trigram_word_similar=q, description_match__gte=DESCRIPTION_MATCH
+            )
+        )
+
 
 class Item(models.Model):
     """A piece of gear. Its loan state is on this row: `borrower` is the requester while
@@ -264,6 +291,16 @@ class Item(models.Model):
                 condition=~models.Q(borrower=models.F("owner"))
                 | models.Q(loan_status=LoanStatus.ON_LOAN, loan_inventory__isnull=True),
                 name="gear_library_item_owner_use",
+            ),
+        ]
+        indexes = [
+            GinIndex(
+                fields=["name"], name="gear_library_item_name_trgm", opclasses=["gin_trgm_ops"]
+            ),
+            GinIndex(
+                fields=["description"],
+                name="gear_library_item_desc_trgm",
+                opclasses=["gin_trgm_ops"],
             ),
         ]
 

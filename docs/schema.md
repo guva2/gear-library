@@ -124,6 +124,15 @@ The checks below arrive with the loan columns in M9.
   null. This is the owner using their own item. This check arrives in M11.
 - There is no loan history. The row holds only the current loan state.
 
+Search indexes, built in M8:
+
+- A GIN trigram index (`gin_trgm_ops`) on `name` (`gear_library_item_name_trgm`) and one
+  on `description` (`gear_library_item_desc_trgm`). They need the `pg_trgm` extension,
+  which the same migration enables. They serve the `%>` word-similarity operator.
+- Every database connection sets `pg_trgm.word_similarity_threshold` to 0.5 when it
+  starts, through the `options` connection parameter in `config/settings.py`. `%>`
+  matches at this word similarity or more.
+
 ### `InventoryItem` (`gear_library_inventoryitem`)
 
 Built in M7. An item listed in an inventory.
