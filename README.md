@@ -1,22 +1,45 @@
 # Gear Library
 
-Share gear through inventories. You own your items. An inventory is a group of people who
-share gear: only its members see it and the items listed in it. You can create or join any
-number of inventories, and you have one role in each:
+This is a toy project inspired by the Chicago Tool Library and Little Free Libraries. The
+project allows users to make connections and borrow items from each other. Connections
+really should only be made with trusted friends in real life, which practically limits
+the scope of the user network.
 
-- `member`: sees the inventory's items and requests to borrow them, and sees who its admins
-  and owners are.
-- `admin`: also sees every member, invites their connections and revokes invites, lists
-  and removes their own items, uses the inventory's items without asking, approves and
-  declines borrow requests made through the inventory, and marks those items returned.
-- `owner`: also sets members' roles, removes members, and renames or deletes the
-  inventory.
+The model is built around users, connections, and inventories with 3 major roles. I went
+with this style of model because I was interested in learning about Django Rest Framework
+and the access control features it offered. I thought that user defined inventories would
+mesh nicely with the concept of user groups. I also figured it would introduce relevant
+distributed systems problems that some simpler models would miss. The three roles in an
+inventory are:
 
-You can also mark your own items unavailable while you use them. The full rights of each
-role are in [`docs/schema.md`](docs/schema.md).
+- `member`: this role is limited to borrowing items from an inventory.
+- `admin`: this role can approve/decline requests to borrow items as well as add/remove
+  items and members from an inventory. I was thinking of this role as a roommate in a
+  house with a shared inventory, or a regular at a shared workshop.
+- `owner`: the owner has the responsibility of the admin, but additionally can change
+  the roles of the inventory's members.
 
-You connect with other users by phone number: send a request, and they accept or decline
-it. Connected users see each other's name and phone number.
+The full rights of each role are in [`docs/schema.md`](docs/schema.md). In order to add
+users to inventories, you must first connect with them using the phone number associated
+with the account. I wanted a simple user login flow and connection mechanism. Phone
+number seemed nice to me because it implies that connecting users already trust each
+other enough in real life to swap numbers. Additionally, it means connected users
+already have a communication channel, and I didn't want to include a chat in the scope
+of this project.
+
+In hindsight I would have preferred a simpler solution because I couldn't review it all,
+but toward the beginning of the project I was more nervous about submitting something
+trivial. I'd like to call out that I included a front-end because I wanted to provide
+a concrete demo, however I did not review any of the front-end code. I'm not a front-end
+expert by any means, I just wanted an end-to-end prototype. I spent my development time
+reviewing the backend, which was basically all written by Claude code. I reviewed all of
+the backend source code, although I was learning some Django Rest Framework best
+practices on the fly so I definitely had some blind spots. I also collaborated with
+Claude on test design for the project, but didn't actually review most of the test code.
+I got a little too ambitious and realized I couldn't finish this project end-to-end if
+I fully reviewed the front-end or tests.
+
+The rest of this doc outlines how to setup/build/run this app and is written by Claude.
 
 Runs locally with Docker Compose: PostgreSQL, a Django REST Framework backend and a Vite +
 React frontend. The database design is in [`docs/schema.md`](docs/schema.md) and the API
