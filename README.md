@@ -99,17 +99,9 @@ request and one loan. Running it again changes nothing: users that already exist
 as they are, a demo inventory is skipped when its owner below is already in an inventory
 with that name, a demo connection is skipped when the two users already have a connection
 or a request, and a demo item is skipped, with its listings and its loan, when its owner
-already has an item with that name. A database seeded by an older version of this command
-therefore keeps its old connections; to reset them, delete the demo users' connections and
-run `seed_demo` again. Its demo items already exist, so they get no borrow request or loan.
-An existing demo inventory likewise keeps its old members and invites, and the table below
-describes only a fresh database. On one seeded by an older version, Avery still has a
-pending Camping Crew invite, gets a second one to Hiking Group, and sees nothing on
-Discover until accepting the Camping Crew invite. To get the new layout, accept it as Avery
-in the app, or start from an empty database with `docker compose down -v`, then
-`docker compose up` and the command above.
-Log in at
-<http://localhost:5173> with any of them, using the password `gear-library-demo`:
+already has an item with that name. The tables below describe a freshly seeded database.
+
+Log in at <http://localhost:5173> with any of them, using the password `gear-library-demo`:
 
 | Phone number | Name | Climbing Club | Camping Crew | Hiking Group |
 |---|---|---|---|---|

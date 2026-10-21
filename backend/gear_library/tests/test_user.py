@@ -6,18 +6,22 @@ from django.db import IntegrityError, transaction
 
 User = get_user_model()
 
-PHONE = "5551234567"
-CONSTRAINT = "gear_library_user_phone_number_10_digits"
+PHONE = "5552234567"
+CONSTRAINT = "gear_library_user_phone_number_valid"
 NAMES = {"first_name": "Ada", "last_name": "Lovelace"}
 
 # Each value fits in the column, so only the check constraint can reject it.
 INVALID_PHONES = [
     "",
-    "555123456",  # 9 digits
-    "555-123-45",
-    "555123456a",
-    " 555123456",
+    "555223456",  # 9 digits
+    "555-223-45",
+    "555223456a",
+    " 555223456",
     "١٢٣٤٥٦٧٨٩٠",  # Arabic-Indic digits
+    "0552234567",  # area code starts with 0
+    "1552234567",  # area code starts with 1
+    "5550234567",  # exchange starts with 0
+    "5551234567",  # exchange starts with 1
 ]
 
 
@@ -51,7 +55,7 @@ class TestCreateUser:
             User.objects.create_user(phone_number="", password="s3cret-pass", **NAMES)
 
     @pytest.mark.parametrize(
-        "phone", [p for p in INVALID_PHONES if p] + ["55512345678"]
+        "phone", [p for p in INVALID_PHONES if p] + ["55522345678"]
     )
     def test_rejects_invalid_phone_number(self, phone):
         with pytest.raises(ValidationError):
@@ -89,7 +93,7 @@ class TestCreateSuperuser:
 
 @pytest.mark.django_db
 class TestPhoneNumberValidator:
-    @pytest.mark.parametrize("phone", INVALID_PHONES + ["55512345678"])
+    @pytest.mark.parametrize("phone", INVALID_PHONES + ["55522345678"])
     def test_full_clean_rejects(self, phone):
         user = User(phone_number=phone, **NAMES)
         user.set_password("s3cret-pass")
@@ -110,7 +114,7 @@ class TestPhoneNumberDatabaseConstraints:
     @pytest.mark.parametrize("phone", INVALID_PHONES)
     def test_check_constraint_rejects_insert(self, phone):
         with pytest.raises(IntegrityError, match=CONSTRAINT), transaction.atomic():
-            User.objects.bulk_create([User(phone_number=phone, password="x")])
+            User.objects.bulk_create([User(phone_number=phone, password="x", **NAMES)])
 
     def test_check_constraint_rejects_update(self):
         user = User.objects.create_user(phone_number=PHONE, password="s3cret-pass", **NAMES)
@@ -122,7 +126,7 @@ class TestPhoneNumberDatabaseConstraints:
         User.objects.create_user(phone_number=PHONE, password="s3cret-pass", **NAMES)
 
         with pytest.raises(IntegrityError), transaction.atomic():
-            User.objects.bulk_create([User(phone_number=PHONE, password="x")])
+            User.objects.bulk_create([User(phone_number=PHONE, password="x", **NAMES)])
 
 
 @pytest.mark.django_db
@@ -136,7 +140,7 @@ class TestNames:
         assert (user.first_name, user.last_name) == ("Ada", "Lovelace")
 
     @pytest.mark.parametrize("field", ["first_name", "last_name"])
-    @pytest.mark.parametrize("value", ["", "x" * 33])
+    @pytest.mark.parametrize("value", ["", "   ", "\u00a0\u3000", "x" * 33])
     def test_full_clean_rejects_blank_or_long_name(self, field, value):
         user = User(phone_number=PHONE, first_name="Ada", last_name="Lovelace")
         setattr(user, field, value)
@@ -151,3 +155,25 @@ class TestNames:
         user.set_password("s3cret-pass")
 
         user.full_clean()
+
+    @pytest.mark.parametrize("field", ["first_name", "last_name"])
+    @pytest.mark.parametrize("value", ["", " ", "\t\u3000"])
+    def test_check_constraint_rejects_a_blank_name(self, field, value):
+        user = User(phone_number=PHONE, password="x", first_name="Ada", last_name="Lovelace")
+        setattr(user, field, value)
+
+        with pytest.raises(IntegrityError, match=f"gear_library_user_{field}_not_blank"):
+            with transaction.atomic():
+                User.objects.bulk_create([user])
+
+    def test_check_constraint_rejects_blanking_a_name(self):
+        user = User.objects.create_user(phone_number=PHONE, password="x", **NAMES)
+
+        with pytest.raises(IntegrityError, match="gear_library_user_last_name_not_blank"):
+            with transaction.atomic():
+                User.objects.filter(pk=user.pk).update(last_name="")
+
+    def test_check_constraint_accepts_a_name_with_spaces_around_it(self):
+        User.objects.bulk_create(
+            [User(phone_number=PHONE, password="x", first_name=" Ada ", last_name="Lovelace")]
+        )

@@ -37,7 +37,7 @@ behind "who may call" are in [`schema.md`](schema.md).
 |---|---|---|---|
 | `GET` | `/api/auth/csrf/` | Anyone. Sets the `csrftoken` cookie. | |
 | `POST` | `/api/auth/register/` | Not logged in. Creates a user. | `400`: invalid or duplicate phone number, weak password (a duplicate number and a weak password are reported together). `403`: logged in. |
-| `POST` | `/api/auth/login/` | Anyone. | `400`: wrong phone number or password. |
+| `POST` | `/api/auth/login/` | Anyone. At most 5 attempts per minute from one address. | `400`: wrong phone number or password. `429`: too many attempts. |
 | `POST` | `/api/auth/logout/` | Logged in. | `403` |
 | `GET` | `/api/auth/me/` | Logged in. The current user. | `403` when anonymous. |
 
@@ -48,9 +48,21 @@ cookie: read it again before the next unsafe request.
 ### Phone numbers
 
 Requests may format a phone number with spaces, dots, dashes and parentheses, and may
-start it with `1` or `+1`: `(555) 123-4567`, `+1 555-123-4567` and `5551234567` are the
+start it with `1` or `+1`: `(555) 234-5678`, `+1 555-234-5678` and `5552345678` are the
 same number. Responses always carry 10 digits. Any other value is a `400` on
-`phone_number`.
+`phone_number`:
+
+```json
+{"phone_number": ["Enter a 10-digit US phone number."]}
+```
+
+The area code and the exchange (the 3 digits after it) cannot start with 0 or 1, as in
+the North American Numbering Plan. A number that breaks this rule is a `400` on
+`phone_number`:
+
+```json
+{"phone_number": ["Enter a valid US phone number: the area code and the 3 digits after it cannot start with 0 or 1."]}
+```
 
 ### User
 
@@ -107,6 +119,21 @@ The body of `register`, `login` and `me` responses.
 
 A missing field, or a `phone_number` that is not a phone number, is a `400` keyed by that
 field instead.
+
+Each address gets 5 attempts per minute, counted whether they succeed or fail, and from a
+logged-in session too. The address is the connection's own: `X-Forwarded-For` is ignored.
+The sixth attempt within the minute is a `429` with a `Retry-After` header in seconds:
+
+```json
+{"detail": "Too many attempts. Try again in a minute."}
+```
+
+The count is read and then written without a lock, so a burst of parallel attempts can get
+more than 5 through before the count catches up.
+
+The count lives in the server process's memory, so it starts again when the server
+restarts. Requests through the Vite development server's proxy all come from the proxy's
+address, so every browser using it shares one count.
 
 ### `POST /api/auth/logout/`
 
@@ -314,7 +341,7 @@ number it went to, until it is accepted.
 `GET /api/connections/requests/` returns both lists, each oldest first:
 
 ```json
-{"received": [{"id": 4, "status": "pending", "user": {"first_name": "Sam", "last_name": "Okafor"}}], "sent": [{"id": 5, "status": "pending", "user": {"phone_number": "5551230004"}}]}
+{"received": [{"id": 4, "status": "pending", "user": {"first_name": "Sam", "last_name": "Okafor"}}], "sent": [{"id": 5, "status": "pending", "user": {"phone_number": "5552340004"}}]}
 ```
 
 ### `POST /api/connections/`

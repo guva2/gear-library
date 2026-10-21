@@ -139,7 +139,7 @@ def test_does_not_touch_an_inventory_with_a_demo_name_that_is_not_the_demo_one()
     Item.objects.end_loan()
     Inventory.objects.all().delete()
     stranger = User.objects.create_user(
-        phone_number="5551239999", first_name="Real", last_name="Person"
+        phone_number="5552239999", first_name="Real", last_name="Person"
     )
     for name in demo_names:
         real = Inventory.objects.create(name=name)
@@ -193,7 +193,7 @@ def test_leaves_a_real_users_connection_to_a_demo_user_alone():
     seed()
     avery = demo_users()[0]
     stranger = User.objects.create_user(
-        phone_number="5551239999", first_name="Real", last_name="Person"
+        phone_number="5552239999", first_name="Real", last_name="Person"
     )
     first, second = ordered_pair(avery, stranger)
     real = Connection.objects.create(
@@ -336,3 +336,17 @@ def test_avery_joined_camping_crew_through_an_invite_from_sam():
         inventory__name="Camping Crew", user__first_name="Avery"
     )
     assert membership.invited_by.first_name == "Sam"
+
+
+@pytest.mark.django_db
+def test_every_active_member_but_the_owner_has_an_admin_or_owner_as_inviter():
+    seed()
+
+    for membership in Membership.objects.active().exclude(role="owner"):
+        assert membership.invited_by is not None, membership.user.first_name
+        inviter = Membership.objects.active().get(
+            inventory=membership.inventory, user=membership.invited_by
+        )
+        assert inviter.role in ("admin", "owner")
+    for owner in Membership.objects.filter(role="owner"):
+        assert owner.invited_by is None

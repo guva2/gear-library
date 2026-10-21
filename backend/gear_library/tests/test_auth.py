@@ -13,14 +13,18 @@ LOGIN_URL = "/api/auth/login/"
 LOGOUT_URL = "/api/auth/logout/"
 ME_URL = "/api/auth/me/"
 
-PHONE = "5551234567"
+PHONE = "5552234567"
 PASSWORD = "correct-horse-battery"
 REGISTRATION = {
-    "phone_number": "(555) 123-4567",
+    "phone_number": "(555) 223-4567",
     "first_name": "Ada",
     "last_name": "Lovelace",
     "password": PASSWORD,
 }
+NUMBERING_PLAN_ERROR = (
+    "Enter a valid US phone number: the area code and the 3 digits after it cannot "
+    "start with 0 or 1."
+)
 WRONG_CREDENTIALS = {"non_field_errors": ["Wrong phone number or password."]}
 
 
@@ -93,7 +97,7 @@ class TestRegister:
         assert user.check_password(PASSWORD)
         assert client.get(ME_URL).json() == me_payload(user)
 
-    @pytest.mark.parametrize("phone", ["", "555-1234", "+2 555 123 4567", "555123456a"])
+    @pytest.mark.parametrize("phone", ["", "555-2234", "+2 555 223 4567", "555223456a", "(155) 223-4567"])
     def test_rejects_an_invalid_phone_number(self, client, phone):
         response = client.post(
             REGISTER_URL, {**REGISTRATION, "phone_number": phone}, format="json"
@@ -110,7 +114,7 @@ class TestRegister:
         assert set(response.json()) == {"phone_number", "first_name", "last_name", "password"}
 
     @pytest.mark.parametrize("field", ["first_name", "last_name"])
-    @pytest.mark.parametrize("value", ["", "   ", "x" * 33])
+    @pytest.mark.parametrize("value", ["", "   ", "\u00a0\u3000", "x" * 33])
     def test_rejects_a_blank_or_long_name(self, client, field, value):
         response = client.post(REGISTER_URL, {**REGISTRATION, field: value}, format="json")
 
@@ -169,7 +173,7 @@ class TestRegister:
 
     def test_rejects_a_duplicate_phone_number(self, client, user):
         response = client.post(
-            REGISTER_URL, {**REGISTRATION, "phone_number": "+1 555.123.4567"}, format="json"
+            REGISTER_URL, {**REGISTRATION, "phone_number": "+1 555.223.4567"}, format="json"
         )
 
         assert response.status_code == 400
@@ -249,7 +253,7 @@ class TestLogin:
 
     def test_accepts_a_formatted_phone_number(self, client, user):
         response = client.post(
-            LOGIN_URL, {"phone_number": "+1 (555) 123-4567", "password": PASSWORD}, format="json"
+            LOGIN_URL, {"phone_number": "+1 (555) 223-4567", "password": PASSWORD}, format="json"
         )
 
         assert response.status_code == 200
@@ -281,11 +285,19 @@ class TestLogin:
 
     def test_rejects_a_malformed_phone_number_on_its_field(self, client, user):
         response = client.post(
-            LOGIN_URL, {"phone_number": "555-1234", "password": PASSWORD}, format="json"
+            LOGIN_URL, {"phone_number": "555-2234", "password": PASSWORD}, format="json"
         )
 
         assert response.status_code == 400
         assert response.json() == {"phone_number": ["Enter a 10-digit US phone number."]}
+
+    def test_rejects_a_number_outside_the_numbering_plan_on_its_field(self, client, user):
+        response = client.post(
+            LOGIN_URL, {"phone_number": "(555) 123-4567", "password": PASSWORD}, format="json"
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {"phone_number": [NUMBERING_PLAN_ERROR]}
 
     def test_requires_both_fields(self, client):
         response = client.post(LOGIN_URL, {}, format="json")

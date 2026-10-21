@@ -16,7 +16,7 @@ User = get_user_model()
 
 def make_user(n, first_name="User"):
     return User.objects.create_user(
-        phone_number=f"555123{n:04d}", first_name=first_name, last_name=str(n)
+        phone_number=f"555223{n:04d}", first_name=first_name, last_name=str(n)
     )
 
 

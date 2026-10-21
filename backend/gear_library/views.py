@@ -1,6 +1,8 @@
 """The API's views. Everything under `/api/inventories/{id}/` derives from
 `InventoryScopedViewSet`."""
 
+import math
+
 from django.contrib import auth
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -26,7 +28,7 @@ from rest_framework.decorators import (
     authentication_classes,
     permission_classes,
 )
-from rest_framework.exceptions import MethodNotAllowed, NotFound, ValidationError
+from rest_framework.exceptions import MethodNotAllowed, NotFound, Throttled, ValidationError
 from rest_framework.permissions import SAFE_METHODS, AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
@@ -77,10 +79,12 @@ from .serializers import (
     SentRequestSerializer,
     UserSerializer,
 )
+from .throttles import LoginRateThrottle
 
 User = get_user_model()
 
 WRONG_CREDENTIALS = "Wrong phone number or password."
+TOO_MANY_ATTEMPTS = "Too many attempts. Try again in a minute."
 PHONE_TAKEN = User._meta.get_field("phone_number").error_messages["unique"]
 
 
@@ -132,6 +136,13 @@ class ApiViewSet(GenericViewSet):
 
 
 class AuthViewSet(ApiViewSet):
+    def throttled(self, request, wait):
+        # Only login has a throttle.
+        refusal = Throttled(detail=TOO_MANY_ATTEMPTS)
+        # Sets Retry-After without DRF's "Expected available in N seconds." in the detail.
+        refusal.wait = math.ceil(wait) if wait is not None else None
+        raise refusal
+
     @action(detail=False, authentication_classes=[], permission_classes=[AllowAny])
     def csrf(self, request):
         get_token(request)
@@ -178,6 +189,7 @@ class AuthViewSet(ApiViewSet):
         methods=["post"],
         authentication_classes=[CsrfSessionAuthentication],
         permission_classes=[AllowAny],
+        throttle_classes=[LoginRateThrottle],
     )
     def login(self, request):
         serializer = LoginSerializer(data=request.data)

@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from .inventories import has_role
 from .models import InventoryItem, Item, LoanStatus, Membership, Role
-from .phone import normalize_phone_number
+from .phone import follows_numbering_plan, normalize_phone_number
 
 User = get_user_model()
 
@@ -11,12 +11,18 @@ User = get_user_model()
 class PhoneNumberField(serializers.CharField):
     default_error_messages = {
         "invalid": "Enter a 10-digit US phone number.",
+        "numbering_plan": (
+            "Enter a valid US phone number: the area code and the 3 digits after it cannot "
+            "start with 0 or 1."
+        ),
     }
 
     def to_internal_value(self, data):
         phone_number = normalize_phone_number(super().to_internal_value(data))
         if phone_number is None:
             self.fail("invalid")
+        if not follows_numbering_plan(phone_number):
+            self.fail("numbering_plan")
         return phone_number
 
 

@@ -70,7 +70,13 @@ AUTH_USER_MODEL = "gear_library.User"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_THROTTLE_RATES": {"login": "5/min"},
+    # Throttles key on REMOTE_ADDR and ignore X-Forwarded-For, which any client can set.
+    "NUM_PROXIES": 0,
 }
+
+# Holds the throttle counts. Local memory is per process: each server process counts apart.
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
 AUTH_PASSWORD_VALIDATORS = [
     {

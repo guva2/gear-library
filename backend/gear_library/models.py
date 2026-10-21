@@ -5,8 +5,11 @@ from django.contrib.postgres.search import TrigramSimilarity, TrigramWordSimilar
 from django.core.validators import RegexValidator
 from django.db import models
 
-# [0-9], not \d: Python's \d matches any Unicode digit, not only ASCII 0-9.
-PHONE_NUMBER_PATTERN = r"^[0-9]{10}$"
+from .phone import PHONE_NUMBER_PATTERN
+
+# A name has a character that is not whitespace. Every character Postgres matches with `\s`
+# is also whitespace to Python, so the check constraint accepts any name the validator does.
+NAME_PATTERN = r"\S"
 
 ONE_MEMBERSHIP_PER_USER = "gear_library_membership_one_per_user"
 ONE_CONNECTION_PER_PAIR = "gear_library_connection_one_per_pair"
@@ -15,6 +18,9 @@ ONE_LISTING_PER_ITEM = "gear_library_inventoryitem_one_per_item"
 # A description matches a search at this word similarity or more. A name matches at
 # `pg_trgm.word_similarity_threshold`, set in `config/settings.py`.
 DESCRIPTION_MATCH = 0.6
+
+
+_not_blank = RegexValidator(NAME_PATTERN, message="This field cannot be blank.")
 
 
 class UserManager(BaseUserManager):
@@ -46,13 +52,16 @@ class User(AbstractBaseUser, PermissionsMixin):
         validators=[
             RegexValidator(
                 PHONE_NUMBER_PATTERN,
-                message="Enter a US phone number as exactly 10 digits.",
+                message=(
+                    "Enter a US phone number as exactly 10 digits. The area code and the "
+                    "3 digits after it cannot start with 0 or 1."
+                ),
             )
         ],
         error_messages={"unique": "A user with this phone number already exists."},
     )
-    first_name = models.CharField(max_length=32)
-    last_name = models.CharField(max_length=32)
+    first_name = models.CharField(max_length=32, validators=[_not_blank])
+    last_name = models.CharField(max_length=32, validators=[_not_blank])
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -66,7 +75,15 @@ class User(AbstractBaseUser, PermissionsMixin):
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(phone_number__regex=PHONE_NUMBER_PATTERN),
-                name="gear_library_user_phone_number_10_digits",
+                name="gear_library_user_phone_number_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(first_name__regex=NAME_PATTERN),
+                name="gear_library_user_first_name_not_blank",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(last_name__regex=NAME_PATTERN),
+                name="gear_library_user_last_name_not_blank",
             ),
         ]
 

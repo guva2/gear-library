@@ -25,17 +25,26 @@ DEMO_USERS = [
     (SAM, "Sam", "Okafor"),
 ]
 
-# Each inventory's first member is its owner, and is how a later run recognises it. A member
-# is (phone number, role), or (phone number, role, invited by) for one who accepted an invite.
+# Each inventory's first member is its owner, who created it, and is how a later run
+# recognises it: (phone number, role). Every other member accepted an invite from an admin
+# or owner: (phone number, role, invited by).
 DEMO_INVENTORIES = [
     {
         "name": "Climbing Club",
-        "members": [(AVERY, Role.OWNER), (JORDAN, Role.ADMIN), (SAM, Role.MEMBER)],
+        "members": [
+            (AVERY, Role.OWNER),
+            (JORDAN, Role.ADMIN, AVERY),
+            (SAM, Role.MEMBER, AVERY),
+        ],
         "invites": [],
     },
     {
         "name": "Camping Crew",
-        "members": [(JORDAN, Role.OWNER), (SAM, Role.ADMIN), (AVERY, Role.MEMBER, SAM)],
+        "members": [
+            (JORDAN, Role.OWNER),
+            (SAM, Role.ADMIN, JORDAN),
+            (AVERY, Role.MEMBER, SAM),
+        ],
         "invites": [],
     },
     {

@@ -10,12 +10,12 @@ User = get_user_model()
 
 @pytest.fixture
 def ada():
-    return User.objects.create_user(phone_number="5551230001", first_name="Ada", last_name="L")
+    return User.objects.create_user(phone_number="5552230001", first_name="Ada", last_name="L")
 
 
 @pytest.fixture
 def bob():
-    return User.objects.create_user(phone_number="5551230002", first_name="Bob", last_name="B")
+    return User.objects.create_user(phone_number="5552230002", first_name="Bob", last_name="B")
 
 
 @pytest.fixture
