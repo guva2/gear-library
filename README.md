@@ -94,7 +94,7 @@ missing.
 docker compose run --rm backend python manage.py seed_demo
 ```
 
-creates three demo users, three inventories, the users' connections, their gear, one borrow
+creates four demo users, three inventories, the users' connections, their gear, one borrow
 request and one loan. Running it again changes nothing: users that already exist are left
 as they are, a demo inventory is skipped when its owner below is already in an inventory
 with that name, a demo connection is skipped when the two users already have a connection
@@ -108,17 +108,18 @@ Log in at <http://localhost:5173> with any of them, using the password `gear-lib
 | (555) 555-0101 | Avery Brooks | owner | member | pending invite from Sam, not a member yet |
 | (555) 555-0102 | Jordan Diaz | admin | owner | not a member |
 | (555) 555-0103 | Sam Okafor | member | admin | owner |
+| (555) 555-0104 | Riley Nakamura | not a member | not a member | not a member |
 
 Discover shows a user only the items they can borrow but not use themselves: Avery sees
 the Camping Crew gear and Sam the Climbing Club gear, except the first aid kit, which is
-listed in both. Jordan is an admin or owner everywhere and sees nothing. Hiking Group has
-no gear.
+listed in both. Jordan is an admin or owner everywhere and sees nothing. Riley is in no
+inventory, has no gear and sees nothing. Hiking Group has no gear.
 
 Connections:
 
-- Sam and Avery are connected.
-- Jordan and Sam are connected.
-- Avery has sent Jordan a request, which is pending.
+- Avery, Jordan and Sam are all connected to each other. Every invite, accepted or
+  pending, went to a connection of its sender.
+- Riley has sent Avery a request, which is pending.
 
 Gear, and where it is listed:
 

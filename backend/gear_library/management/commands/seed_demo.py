@@ -18,11 +18,12 @@ from gear_library.models import (
 DEMO_PASSWORD = "gear-library-demo"
 
 # 555-01xx numbers are reserved for fictional use.
-AVERY, JORDAN, SAM = "5555550101", "5555550102", "5555550103"
+AVERY, JORDAN, SAM, RILEY = "5555550101", "5555550102", "5555550103", "5555550104"
 DEMO_USERS = [
     (AVERY, "Avery", "Brooks"),
     (JORDAN, "Jordan", "Diaz"),
     (SAM, "Sam", "Okafor"),
+    (RILEY, "Riley", "Nakamura"),
 ]
 
 # Each inventory's first member is its owner, who created it, and is how a later run
@@ -56,11 +57,12 @@ DEMO_INVENTORIES = [
 ]
 
 # (requested by, other user, status). A later run skips a pair that already has a row.
-# Each invite above goes to a connection of its sender.
+# Every invite above, pending or accepted, is between users with an accepted connection.
 DEMO_CONNECTIONS = [
     (SAM, AVERY, ConnectionStatus.ACCEPTED),
     (JORDAN, SAM, ConnectionStatus.ACCEPTED),
-    (AVERY, JORDAN, ConnectionStatus.PENDING),
+    (AVERY, JORDAN, ConnectionStatus.ACCEPTED),
+    (RILEY, AVERY, ConnectionStatus.PENDING),
 ]
 
 

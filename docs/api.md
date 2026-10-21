@@ -37,7 +37,7 @@ behind "who may call" are in [`schema.md`](schema.md).
 |---|---|---|---|
 | `GET` | `/api/auth/csrf/` | Anyone. Sets the `csrftoken` cookie. | |
 | `POST` | `/api/auth/register/` | Not logged in. Creates a user. | `400`: invalid or duplicate phone number, weak password (a duplicate number and a weak password are reported together). `403`: logged in. |
-| `POST` | `/api/auth/login/` | Anyone. At most 5 attempts per minute from one address. | `400`: wrong phone number or password. `429`: too many attempts. |
+| `POST` | `/api/auth/login/` | Anyone. | `400`: wrong phone number or password. |
 | `POST` | `/api/auth/logout/` | Logged in. | `403` |
 | `GET` | `/api/auth/me/` | Logged in. The current user. | `403` when anonymous. |
 
@@ -119,21 +119,6 @@ The body of `register`, `login` and `me` responses.
 
 A missing field, or a `phone_number` that is not a phone number, is a `400` keyed by that
 field instead.
-
-Each address gets 5 attempts per minute, counted whether they succeed or fail, and from a
-logged-in session too. The address is the connection's own: `X-Forwarded-For` is ignored.
-The sixth attempt within the minute is a `429` with a `Retry-After` header in seconds:
-
-```json
-{"detail": "Too many attempts. Try again in a minute."}
-```
-
-The count is read and then written without a lock, so a burst of parallel attempts can get
-more than 5 through before the count catches up.
-
-The count lives in the server process's memory, so it starts again when the server
-restarts. Requests through the Vite development server's proxy all come from the proxy's
-address, so every browser using it shares one count.
 
 ### `POST /api/auth/logout/`
 
